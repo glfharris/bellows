@@ -154,8 +154,6 @@ Design choices:
 - diagnosis
 - treatment recommendations
 
-The app and docs should continue to make this explicit.
-
 ---
 
 ## Development
@@ -174,8 +172,3 @@ uv run python -m compileall bellows main.py tests
 
 Planned work, known limitations, and future-feature notes live in [TODO.md](TODO.md).
 
----
-
-## Licence
-
-TBD.
