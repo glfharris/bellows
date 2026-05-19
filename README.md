@@ -2,9 +2,9 @@
 
 *A terminal-based ventilation simulator and waveform visualiser for anaesthesia and ICU education.*
 
-`bellows` is a Python TUI for exploring mechanical ventilation waveforms in real time. It simulates a simple single-compartment lung model and renders ventilator traces directly in the terminal.
+`bellows` is a Python TUI for exploring mechanical ventilation waveforms in real time. It simulates a single-compartment lung with selectable pressure-volume mechanics and renders ventilator traces directly in the terminal.
 
-It is intended for education, demonstration, and experimentation. It is **not** clinical software.
+It is intended for education, demonstration, and experimentation. It is **not** clinical software — see [Safety and scope](#safety-and-scope).
 
 > Mechanical ventilation in your terminal.
 
@@ -12,41 +12,13 @@ It is intended for education, demonstration, and experimentation. It is **not** 
 
 ---
 
-## Current Status
-
-Early pre-MVP, but runnable.
-
-Current capabilities:
-
-- Textual-based terminal UI
-- ICU-ventilator inspired dark interface
-- VCV and PCV modes
-- pressure, flow, and volume waveforms shown by default
-- optional CO2 waveform, hidden by default
-- fixed time axis and vertical scale on traces
-- one-shot waveform scale fitting
-- selectable left control panel
-- pause/resume and reset
-- live ventilator and patient setting adjustment
-- patient mechanics presets
-- breath-boundary application for ventilator setting changes
-- monitor numerics from the last completed breath:
-  - Ppeak
-  - VT
-  - MV
-  - EtCO2
-
----
-
-## Running Locally
-
-Install dependencies and run with `uv`:
+## Running
 
 ```bash
 uv run bellows
 ```
 
-The project currently targets Python 3.13+.
+Python 3.13+ via `uv`. Dependencies (Textual) are pulled in automatically.
 
 ---
 
@@ -54,151 +26,127 @@ The project currently targets Python 3.13+.
 
 The left panel is the main control surface.
 
-| Key | Action |
-| --- | --- |
-| `up` / `down` | Select a row in the left control panel |
-| `left` / `right` | Decrease / increase the selected setting |
-| `enter` | Open a picker or toggle the selected row, such as mode, preset, or waveform visibility |
-| `space` | Pause / resume |
-| `tab` | Show / hide the left control panel |
-| `r` | Reset simulation |
-| `q` | Quit |
+| Key              | Action                                                                   |
+| ---------------- | ------------------------------------------------------------------------ |
+| `up` / `down`    | Select a row in the left control panel                                   |
+| `left` / `right` | Decrease / increase the selected setting                                 |
+| `enter`          | Open a picker, or toggle the selected row (mode, preset, waveform, ...)  |
+| `space`          | Pause / resume                                                           |
+| `tab`            | Show / hide the left control panel                                       |
+| `r`              | Reset simulation                                                         |
+| `q`              | Quit                                                                     |
 
-Ventilator setting changes are queued and applied at the next breath boundary, so changing RR, mode, PEEP, I:E, VT, or Pinsp does not distort the current breath mid-cycle.
-
----
-
-## Ventilator Modes
-
-### VCV
-
-Volume control ventilation uses a fixed inspiratory flow to deliver the configured tidal volume.
-
-Adjustable settings:
-
-- VT
-- RR
-- PEEP
-- I:E
-
-### PCV
-
-Pressure control ventilation uses a target inspiratory pressure above PEEP. Flow decelerates as the simulated lung fills.
-
-Adjustable settings:
-
-- Pinsp
-- RR
-- PEEP
-- I:E
+Ventilator setting changes are queued and applied at the next breath boundary, so changing mode or any ventilator setting does not distort the current breath mid-cycle. Patient parameter changes (lung model, compliance, resistance, presets) take effect immediately.
 
 ---
 
-## Patient Model
+## Ventilator modes
 
-The current model is deliberately simple:
+| Mode  | What it does                                                                                                                                                       | Adjustable settings                  |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
+| VCV   | Volume control. Fixed inspiratory flow delivers the configured tidal volume.                                                                                       | `VT`, `RR`, `PEEP`, `I:E`            |
+| PCV   | Pressure control. Decelerating flow toward a target inspiratory pressure above PEEP.                                                                               | `Pinsp`, `RR`, `PEEP`, `I:E`         |
+| PRVC  | Pressure-regulated volume control. PCV-shaped breath; applied Pinsp adapts each breath to track a target VT. The applied Pinsp is shown next to the VT target.     | `VT` (target), `RR`, `PEEP`, `I:E`   |
+| APRV  | Airway pressure release. Pressure alternates between `P_high` (held for `T_high`) and a brief release to `P_low` (for `T_low`). **Passive** — no spontaneous effort is modelled yet, so the trace shows only the mandatory pressure swings. | `P_high`, `P_low`, `T_high`, `T_low` |
+
+---
+
+## Patient model
+
+The simulation uses a single-compartment lung driven by
 
 ```text
-Paw = V / C + Flow * R + PEEP
+Paw = P_elastic(V, phase) + R * Flow
 ```
 
-Where:
+`P_elastic(V)` is the lung's *absolute* elastic recoil at volume `V`. PEEP is the airway pressure the ventilator holds at end-expiration; the lung settles to whatever volume satisfies `P_elastic(V_eq) = PEEP`. The volume trace shows absolute lung volume, so raising PEEP visibly shifts the trace baseline up (recruitment) and the operating point onto a different part of the PV curve.
 
-- `Paw` is airway pressure
-- `V` is lung volume above baseline
-- `C` is compliance
-- `Flow` is airway flow
-- `R` is airway resistance
-- `PEEP` is positive end-expiratory pressure
+### Lung models
 
-Adjustable patient parameters:
+| Model       | `P_elastic`                                  | What it's useful for                                                                                              |
+| ----------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Linear      | `V / C`                                      | Constant compliance, straight PV loop. Simplest model and the default.                                            |
+| Venegas     | sigmoid `V(P) = a + b/(1 + exp(-(P-c)/d))`   | Lower inflection (recruitment) and upper plateau (overdistension). Driving pressure, "best PEEP", protective vent. |
+| Venegas+H   | Venegas sigmoid + inflation/deflation offset | Adds hysteresis between limbs. Surfactant-deficient teaching cases, deflation-limb PEEP titration.                |
 
-- preset
-- compliance
-- resistance
+Live-edit parameters depend on the selected model:
 
-Built-in presets:
+| Model     | Live parameters                                   |
+| --------- | ------------------------------------------------- |
+| Linear    | compliance                                        |
+| Venegas   | inflection, slope, recruitable volume             |
+| Venegas+H | inflection, slope, recruitable volume, hysteresis |
 
-- Normal
-- Stiff
-- Restrictive
-- Obstructed
-- Severe obstruction
+Resistance and a patient preset are available across all models. Each model carries its own preset list (Linear: Normal / Stiff / Restrictive / Obstructed / Severe obstruction; Venegas variants add Recruitable ARDS / Non-recruitable ARDS / Surfactant-deficient). Manual edits change the displayed preset to `Custom`.
 
-Manual compliance or resistance edits change the displayed preset to `Custom`.
-
-CO2 is currently a simplified capnography trace with EtCO2 shown in kPa.
-
-This is enough to make waveform changes plausible and useful for exploration, but it is not a physiologically complete model.
+CO2 is a simplified capnography trace with EtCO2 shown in kPa — enough to make waveform changes plausible, not a complete model.
 
 ---
 
-## Waveforms And Numerics
+## Waveforms and numerics
 
-Waveforms:
+Waveforms (fixed time axis, fixed y-axis ranges, smoother braille-cell rendering, selectable visibility, one-shot scale fit):
 
 - pressure, cmH2O
 - flow, L/min
-- volume, mL
-- CO2, kPa, optional and hidden by default
+- volume, mL (absolute)
+- CO2, kPa — optional, hidden by default
 
-The waveform view includes:
+Monitor numerics, computed from the last completed breath:
 
-- rolling fixed-width time axis
-- vertical scale
-- fixed y-axis ranges with a panel action to fit scales to current traces
-- smoother braille-cell trace rendering
-- selectable visibility for each waveform
-
-Monitor numerics report the last completed breath:
-
-- `Ppeak`, cmH2O
-- `VT`, mL
-- `MV`, L/min
-- `EtCO2`, kPa
+- `Ppeak` (cmH2O)
+- `VT` (mL)
+- `MV` (L/min) — uses the actual cycle length, so APRV's minute volume is correct
+- `EtCO2` (kPa)
 
 ---
 
 ## Architecture
 
-The code is split so the simulation can evolve separately from the terminal UI.
+The simulation is decoupled from the UI so it can evolve independently.
 
 ```text
 bellows/
-    app.py                  Textual application and UI state
+    app.py                      Textual application and UI state
 
     simulation/
-        engine.py           simulation loop and breath timing
-        state.py            settings, patient mechanics, samples
+        engine.py               simulation loop, breath timing, stats
+        state.py                settings, patient mechanics, samples
+        lung_model.py           Linear / Venegas / Venegas+H
+        presets.py              per-model patient presets
 
     ventilator/
         modes/
-            base.py         shared mode contract and helpers
-            vcv.py          volume control ventilation
-            pcv.py          pressure control ventilation
+            base.py             VentilatorMode base, helpers, LastBreathStats
+            vcv.py              volume control
+            pcv.py              pressure control
+            prvc.py             pressure-regulated volume control
+            aprv.py             passive airway pressure release
 
     waveforms/
-        buffers.py          timestamped rolling trace buffers
+        buffers.py              timestamped rolling trace buffers
 
     ui/
-        waveform.py         terminal waveform renderer
+        waveform.py             terminal waveform renderer
+
+tests/
+    test_modes.py               directional tests for VCV / PCV / PRVC / APRV
+    test_lung_model.py          lung-model and PEEP-recruitment tests
 ```
 
-Important design choices:
+Design choices:
 
 - simulation tick and render refresh are decoupled
-- waveform buffers store timestamped samples
-- ventilator modes are modular
-- setting changes can be queued for breath boundaries
-- the UI observes simulation samples rather than owning physiology
+- waveform buffers store timestamped samples; the UI observes them rather than owning physiology
+- ventilator modes carry their own per-breath state via `on_activate` / `on_breath_end` hooks
+- ventilator setting changes queue and apply at breath boundaries; patient changes apply immediately
+- lung mechanics are pluggable behind a `LungModel` protocol
 
 ---
 
-## Safety And Scope
+## Safety and scope
 
-`bellows` is an educational simulator.
-
-It must not be used for:
+`bellows` is an educational simulator. It must not be used for:
 
 - clinical decision-making
 - ventilator setup
@@ -210,86 +158,21 @@ The app and docs should continue to make this explicit.
 
 ---
 
-## TODO
+## Development
 
-Near-term:
-
-- Add focused tests for simulation mechanics and mode switching
-- Improve PCV/VCV transition behavior and pending-setting display
-- Add richer patient presets and teaching notes
-- Add event injection for bronchospasm, leak, and circuit disconnect
-- Add an event log and waveform markers
-- Improve layout behavior on narrow terminals
-- Decide whether old direct shortcut keys should be removed entirely
-
-Simulation:
-
-- Improve CO2 model and dead-space behavior
-- Add spontaneous respiratory effort
-- Add leaks and circuit mechanics
-- Add intrinsic PEEP and incomplete expiration
-- Add plateau pressure and hold manoeuvres
-- Add FiO2 as a setting if oxygenation is later modelled
-
-Modes:
-
-- PSV
-- CPAP
-- SIMV
-- PRVC
-- NIV / BiPAP-style support
-
-Waveform tools:
-
-- Pressure-volume loops
-- Flow-volume loops
-- Breath-by-breath trends
-- Cursor inspection
-- Annotations for setting changes and events
-- Export waveform data
-
-Teaching and scenarios:
-
-- Scenario files
-- Guided teaching mode
-- Example cases
-- Replay support
-
-Possible future scenario format:
-
-```yaml
-name: Bronchospasm during anaesthesia
-patient:
-  preset: normal
-ventilator:
-  mode: VCV
-  vt_ml: 500
-  rr_bpm: 14
-  peep_cm_h2o: 5
-events:
-  - at_s: 30
-    type: bronchospasm
-    severity: moderate
-```
-
----
-
-## Development Notes
-
-Useful checks:
+Run the test suite:
 
 ```bash
-python -m compileall bellows main.py
+uv run python -m unittest discover tests
 ```
 
-When formal tests are added, they should focus first on directional behavior:
+Quick compile check:
 
-- lower compliance should increase VCV peak pressure
-- higher resistance should alter inspiratory and expiratory flow
-- higher PEEP should raise baseline pressure
-- higher VT should increase delivered volume and pressure in VCV
-- higher Pinsp should increase delivered volume in PCV
-- queued ventilator settings should apply at the next breath boundary
+```bash
+uv run python -m compileall bellows main.py tests
+```
+
+Planned work, known limitations, and future-feature notes live in [TODO.md](TODO.md).
 
 ---
 

@@ -1,11 +1,19 @@
-"""Shared contracts and helpers for ventilator modes."""
+"""Shared contracts and helpers for ventilator modes.
+
+The airway pressure equation under the absolute-volume convention:
+
+    Paw = P_elastic(V, phase) + R * Flow
+
+PEEP no longer appears as an additive offset — it's just the airway
+pressure the ventilator holds at end-expiration. The lung settles at
+whatever volume satisfies ``P_elastic(V_eq) = PEEP``.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import exp
-from typing import Protocol
 
+from bellows.simulation.lung_model import PHASE_EXPIRATION, PHASE_INSPIRATION
 from bellows.simulation.state import PatientMechanics, VentilatorSettings
 
 
@@ -17,8 +25,30 @@ class ModeStep:
     lung_volume_l: float
 
 
-class VentilatorMode(Protocol):
-    name: str
+@dataclass(frozen=True)
+class LastBreathStats:
+    """Summary of the breath that just completed."""
+
+    delivered_vt_l: float
+    peak_volume_l: float
+    peak_pressure_cm_h2o: float
+
+
+class VentilatorMode:
+    """Base class for ventilator modes."""
+
+    name: str = "BASE"
+
+    def on_activate(self, settings: VentilatorSettings) -> None:
+        """Called when this mode becomes active. Reset any internal state."""
+
+    def on_breath_end(
+        self,
+        settings: VentilatorSettings,
+        patient: PatientMechanics,
+        stats: LastBreathStats,
+    ) -> None:
+        """Called at the end of each breath with the breath's stats."""
 
     def step(
         self,
@@ -28,7 +58,7 @@ class VentilatorMode(Protocol):
         lung_volume_l: float,
         dt_s: float,
     ) -> ModeStep:
-        ...
+        raise NotImplementedError
 
 
 def passive_expiration(
@@ -36,11 +66,32 @@ def passive_expiration(
     patient: PatientMechanics,
     lung_volume_l: float,
     dt_s: float,
+    floor_pressure_cm_h2o: float | None = None,
 ) -> ModeStep:
-    tau_s = max(patient.time_constant_s, 0.05)
-    next_volume_l = max(0.0, lung_volume_l * exp(-dt_s / tau_s))
-    flow_l_s = (next_volume_l - lung_volume_l) / dt_s
-    pressure_cm_h2o = airway_pressure(settings, patient, next_volume_l, flow_l_s)
+    """Forward-Euler expiration toward ``floor_pressure_cm_h2o``.
+
+    The ventilator holds airway pressure at the floor (PEEP by default).
+    Flow is driven by the gradient between the lung's elastic recoil and
+    the floor, through the airway resistance:
+
+        Flow = (floor - P_elastic(V)) / R
+
+    At equilibrium the lung settles to the volume where
+    ``P_elastic(V_eq) = floor``.
+    """
+
+    floor = settings.peep_cm_h2o if floor_pressure_cm_h2o is None else floor_pressure_cm_h2o
+    elastic_cm_h2o = patient.lung_model.elastic_pressure(
+        lung_volume_l, PHASE_EXPIRATION
+    )
+    driving_cm_h2o = floor - elastic_cm_h2o
+    flow_l_s = driving_cm_h2o / max(patient.resistance_cm_h2o_s_per_l, 1e-3)
+    next_volume_l = max(0.0, lung_volume_l + flow_l_s * dt_s)
+    pressure_cm_h2o = max(
+        floor,
+        patient.lung_model.elastic_pressure(next_volume_l, PHASE_EXPIRATION)
+        + flow_l_s * patient.resistance_cm_h2o_s_per_l,
+    )
     return ModeStep(
         phase="expiration",
         flow_l_s=flow_l_s,
@@ -50,12 +101,12 @@ def passive_expiration(
 
 
 def airway_pressure(
-    settings: VentilatorSettings,
     patient: PatientMechanics,
     lung_volume_l: float,
     flow_l_s: float,
+    phase: str = PHASE_INSPIRATION,
+    floor: float = 0.0,
 ) -> float:
-    elastic = lung_volume_l / patient.compliance_l_per_cm_h2o
+    elastic = patient.lung_model.elastic_pressure(lung_volume_l, phase)
     resistive = flow_l_s * patient.resistance_cm_h2o_s_per_l
-    pressure = elastic + resistive + settings.peep_cm_h2o
-    return max(settings.peep_cm_h2o, pressure)
+    return max(floor, elastic + resistive)

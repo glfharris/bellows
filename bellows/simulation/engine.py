@@ -1,22 +1,29 @@
-"""Deterministic first-pass volume-control ventilation simulation."""
+"""Deterministic first-pass ventilation simulation."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from bellows.simulation.lung_model import PHASE_EXPIRATION
 from bellows.simulation.state import (
     PatientMechanics,
     SimulationSample,
     VentilatorSettings,
 )
+from bellows.ventilator.modes.aprv import AirwayPressureReleaseVentilation
+from bellows.ventilator.modes.base import LastBreathStats, VentilatorMode
 from bellows.ventilator.modes.pcv import PressureControl
+from bellows.ventilator.modes.prvc import PressureRegulatedVolumeControl
 from bellows.ventilator.modes.vcv import VolumeControl
 
 
-MODES = {
-    "VCV": VolumeControl(),
-    "PCV": PressureControl(),
-}
+def _default_modes() -> dict[str, VentilatorMode]:
+    return {
+        "VCV": VolumeControl(),
+        "PCV": PressureControl(),
+        "PRVC": PressureRegulatedVolumeControl(),
+        "APRV": AirwayPressureReleaseVentilation(),
+    }
 
 
 @dataclass
@@ -28,24 +35,40 @@ class VentilationSimulation:
     pending_settings: VentilatorSettings | None = None
     time_s: float = 0.0
     breath_time_s: float = 0.0
-    lung_volume_l: float = 0.0
+    lung_volume_l: float = field(default=0.0, init=False)
     breath: int = 0
+    modes: dict[str, VentilatorMode] = field(default_factory=_default_modes)
+    _active_mode_name: str | None = field(default=None, init=False)
+    _breath_has_samples: bool = field(default=False, init=False)
+    _breath_max_volume_l: float = field(default=0.0, init=False)
+    _breath_min_volume_l: float = field(default=0.0, init=False)
+    _breath_max_pressure_cm_h2o: float = field(default=0.0, init=False)
+
+    def __post_init__(self) -> None:
+        self.lung_volume_l = self._equilibrium_volume()
 
     def reset(self) -> None:
         self.time_s = 0.0
         self.breath_time_s = 0.0
-        self.lung_volume_l = 0.0
+        self.lung_volume_l = self._equilibrium_volume()
         self.breath = 0
         self.pending_settings = None
+        self._active_mode_name = None
+        self._reset_breath_stats()
+
+    def _equilibrium_volume(self) -> float:
+        return self.patient.lung_model.equilibrium_volume(
+            self.settings.peep_cm_h2o, PHASE_EXPIRATION
+        )
 
     def queue_settings(self, settings: VentilatorSettings) -> None:
         self.pending_settings = settings
 
     def step(self, dt_s: float) -> SimulationSample:
+        mode = self._active_mode()
         phase_time_s = self.breath_time_s
         breath = self.breath
 
-        mode = MODES.get(self.settings.mode, MODES["VCV"])
         step = mode.step(
             self.settings,
             self.patient,
@@ -54,6 +77,7 @@ class VentilationSimulation:
             dt_s,
         )
         self.lung_volume_l = step.lung_volume_l
+        self._observe_breath_sample(step.pressure_cm_h2o, self.lung_volume_l)
         co2_kpa = self._co2(phase_time_s)
 
         sample = SimulationSample(
@@ -69,13 +93,55 @@ class VentilationSimulation:
         self.time_s += dt_s
         self.breath_time_s += dt_s
         while self.breath_time_s >= self.settings.cycle_s:
+            self._finish_breath(mode)
             self.breath_time_s -= self.settings.cycle_s
             self.breath += 1
             if self.pending_settings is not None:
                 self.settings = self.pending_settings
                 self.pending_settings = None
+                mode = self._active_mode()
 
         return sample
+
+    def _active_mode(self) -> VentilatorMode:
+        mode = self.modes.get(self.settings.mode)
+        if mode is None:
+            raise ValueError(
+                f"Unknown ventilator mode {self.settings.mode!r}; "
+                f"available: {sorted(self.modes)}"
+            )
+        active_name = mode.name
+        if active_name != self._active_mode_name:
+            mode.on_activate(self.settings)
+            self._active_mode_name = active_name
+        return mode
+
+    def _finish_breath(self, mode: VentilatorMode) -> None:
+        delivered_vt_l = max(0.0, self._breath_max_volume_l - self._breath_min_volume_l)
+        stats = LastBreathStats(
+            delivered_vt_l=delivered_vt_l,
+            peak_volume_l=self._breath_max_volume_l,
+            peak_pressure_cm_h2o=self._breath_max_pressure_cm_h2o,
+        )
+        mode.on_breath_end(self.settings, self.patient, stats)
+        self._reset_breath_stats()
+
+    def _observe_breath_sample(self, pressure_cm_h2o: float, volume_l: float) -> None:
+        if not self._breath_has_samples:
+            self._breath_has_samples = True
+            self._breath_min_volume_l = volume_l
+            self._breath_max_volume_l = volume_l
+            self._breath_max_pressure_cm_h2o = pressure_cm_h2o
+            return
+        self._breath_min_volume_l = min(self._breath_min_volume_l, volume_l)
+        self._breath_max_volume_l = max(self._breath_max_volume_l, volume_l)
+        self._breath_max_pressure_cm_h2o = max(self._breath_max_pressure_cm_h2o, pressure_cm_h2o)
+
+    def _reset_breath_stats(self) -> None:
+        self._breath_has_samples = False
+        self._breath_max_volume_l = 0.0
+        self._breath_min_volume_l = 0.0
+        self._breath_max_pressure_cm_h2o = 0.0
 
     def _co2(self, phase_time_s: float) -> float:
         if phase_time_s < self.settings.inspiratory_time_s:

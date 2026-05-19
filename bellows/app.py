@@ -12,7 +12,17 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, OptionList, Static
 
 from bellows.simulation.engine import VentilationSimulation
-from bellows.simulation.presets import PATIENT_PRESETS, PatientPreset
+from bellows.simulation.lung_model import (
+    LinearLung,
+    LungModel,
+    VenegasHysteresisLung,
+    VenegasLung,
+)
+from bellows.simulation.presets import (
+    LUNG_MODELS,
+    PatientPreset,
+    presets_for,
+)
 from bellows.simulation.state import (
     PatientMechanics,
     SimulationSample,
@@ -20,6 +30,9 @@ from bellows.simulation.state import (
 )
 from bellows.waveforms.buffers import TraceBuffer
 from bellows.ui.waveform import WaveformSpec, WaveformWidget
+
+
+MODES: tuple[str, ...] = ("VCV", "PCV", "PRVC", "APRV")
 
 
 @dataclass
@@ -227,7 +240,7 @@ class BellowsApp(App[None]):
     def __init__(self) -> None:
         super().__init__()
         self.title = "bellows"
-        self.sub_title = "VCV education simulator"
+        self.sub_title = "ventilation education simulator"
         self.simulation = VentilationSimulation()
         self.paused = False
         self.visible_window_s = 12.0
@@ -251,24 +264,13 @@ class BellowsApp(App[None]):
         self.sidebar: Static | None = None
         self.titlebar: Static | None = None
         self.sidebar_visible = True
-        self.control_rows = [
-            ControlRow("mode", "Mode"),
-            ControlRow("target", "Target"),
-            ControlRow("rr", "RR"),
-            ControlRow("peep", "PEEP"),
-            ControlRow("ie", "I:E"),
-            ControlRow("preset", "Preset"),
-            ControlRow("compliance", "Compliance"),
-            ControlRow("resistance", "Resistance"),
-            ControlRow("autoscale", "Fit scales"),
-            ControlRow("pressure", "Pressure"),
-            ControlRow("flow", "Flow"),
-            ControlRow("volume", "Volume"),
-            ControlRow("co2", "CO2 trace"),
-        ]
+        self.control_rows: list[ControlRow] = []
+        self._rebuild_control_rows()
         self.selected_control_index = 0
         self.patient_preset_index = 0
-        self.patient_preset_name = PATIENT_PRESETS[self.patient_preset_index].name
+        self.patient_preset_name = presets_for(
+            self.simulation.patient.lung_model.name
+        )[self.patient_preset_index].name
         self.metrics = BreathMetrics()
         self.message = "Ready"
 
@@ -288,7 +290,7 @@ class BellowsApp(App[None]):
                     id="flow",
                 )
                 volume = WaveformWidget(
-                    WaveformSpec("Volume", "mL", "#72d572", 0.0, 650.0),
+                    WaveformSpec("Volume", "mL", "#72d572", 0.0, 1500.0),
                     id="volume",
                 )
                 co2 = WaveformWidget(
@@ -354,6 +356,8 @@ class BellowsApp(App[None]):
         key = self._selected_control_key()
         if key == "mode":
             self._open_mode_picker()
+        elif key == "lung_model":
+            self._open_lung_model_picker()
         elif key == "preset":
             self._open_patient_preset_picker()
         elif key == "autoscale":
@@ -375,8 +379,9 @@ class BellowsApp(App[None]):
 
     def action_toggle_mode(self) -> None:
         settings = self._editable_settings()
-        mode = "PCV" if settings.mode == "VCV" else "VCV"
-        self._set_settings(replace(settings, mode=mode), f"Mode {mode}")
+        current = settings.mode if settings.mode in MODES else MODES[0]
+        next_mode = MODES[(MODES.index(current) + 1) % len(MODES)]
+        self._set_settings(replace(settings, mode=next_mode), f"Mode {next_mode}")
 
     def action_toggle_co2(self) -> None:
         self._toggle_waveform("co2")
@@ -444,19 +449,83 @@ class BellowsApp(App[None]):
         self._set_settings(replace(settings, ie_e=value), f"I:E 1:{value:g}")
 
     def action_compliance_down(self) -> None:
+        self._nudge_linear_compliance(-0.005)
+
+    def action_compliance_up(self) -> None:
+        self._nudge_linear_compliance(0.005)
+
+    def _nudge_linear_compliance(self, delta: float) -> None:
         patient = self.simulation.patient
-        value = max(0.01, patient.compliance_l_per_cm_h2o - 0.005)
+        if not isinstance(patient.lung_model, LinearLung):
+            self.message = "Compliance is fixed: lung model is non-linear"
+            self._refresh_static_panels()
+            return
+        value = max(0.01, min(0.12, patient.lung_model.compliance_l_per_cm_h2o + delta))
         self._set_patient(
-            replace(patient, compliance_l_per_cm_h2o=value),
+            replace(patient, lung_model=LinearLung(compliance_l_per_cm_h2o=value)),
             f"Compliance {value * 1000:.0f} mL/cmH2O",
         )
 
-    def action_compliance_up(self) -> None:
+    def action_inflection_down(self) -> None:
+        self._nudge_venegas("inflection_cm_h2o", -1.0, 5.0, 40.0, "Inflection", " cmH2O")
+
+    def action_inflection_up(self) -> None:
+        self._nudge_venegas("inflection_cm_h2o", 1.0, 5.0, 40.0, "Inflection", " cmH2O")
+
+    def action_slope_down(self) -> None:
+        self._nudge_venegas("slope_width_cm_h2o", -0.5, 2.0, 15.0, "Slope", " cmH2O")
+
+    def action_slope_up(self) -> None:
+        self._nudge_venegas("slope_width_cm_h2o", 0.5, 2.0, 15.0, "Slope", " cmH2O")
+
+    def action_recruitable_down(self) -> None:
+        self._nudge_venegas(
+            "recruitable_volume_l", -0.1, 0.3, 2.5, "Recruitable", " L",
+        )
+
+    def action_recruitable_up(self) -> None:
+        self._nudge_venegas(
+            "recruitable_volume_l", 0.1, 0.3, 2.5, "Recruitable", " L",
+        )
+
+    def action_hysteresis_down(self) -> None:
+        self._nudge_venegas(
+            "hysteresis_offset_cm_h2o", -0.5, 0.0, 10.0, "Hysteresis", " cmH2O",
+        )
+
+    def action_hysteresis_up(self) -> None:
+        self._nudge_venegas(
+            "hysteresis_offset_cm_h2o", 0.5, 0.0, 10.0, "Hysteresis", " cmH2O",
+        )
+
+    def _nudge_venegas(
+        self,
+        field_name: str,
+        delta: float,
+        low: float,
+        high: float,
+        label: str,
+        unit: str,
+    ) -> None:
         patient = self.simulation.patient
-        value = min(0.12, patient.compliance_l_per_cm_h2o + 0.005)
+        lung = patient.lung_model
+        if not isinstance(lung, (VenegasLung, VenegasHysteresisLung)):
+            self.message = f"{label} only applies to Venegas lung models"
+            self._refresh_static_panels()
+            return
+        if field_name == "hysteresis_offset_cm_h2o" and not isinstance(
+            lung, VenegasHysteresisLung
+        ):
+            self.message = "Hysteresis only applies to Venegas+H"
+            self._refresh_static_panels()
+            return
+        current = getattr(lung, field_name)
+        value = max(low, min(high, current + delta))
+        new_lung = replace(lung, **{field_name: value})
+        formatted = f"{value:.1f}" if abs(delta) < 1.0 else f"{value:.0f}"
         self._set_patient(
-            replace(patient, compliance_l_per_cm_h2o=value),
-            f"Compliance {value * 1000:.0f} mL/cmH2O",
+            replace(patient, lung_model=new_lung),
+            f"{label} {formatted}{unit}",
         )
 
     def action_resistance_down(self) -> None:
@@ -473,6 +542,70 @@ class BellowsApp(App[None]):
         self._set_patient(
             replace(patient, resistance_cm_h2o_s_per_l=value),
             f"Resistance {value:.0f} cmH2O*s/L",
+        )
+
+    def action_p_high_down(self) -> None:
+        settings = self._editable_settings()
+        value = max(settings.p_low_cm_h2o + 1.0, settings.p_high_cm_h2o - 1.0)
+        self._set_settings(
+            replace(settings, p_high_cm_h2o=value),
+            f"P_high {value:.0f} cmH2O",
+        )
+
+    def action_p_high_up(self) -> None:
+        settings = self._editable_settings()
+        value = min(50.0, settings.p_high_cm_h2o + 1.0)
+        self._set_settings(
+            replace(settings, p_high_cm_h2o=value),
+            f"P_high {value:.0f} cmH2O",
+        )
+
+    def action_p_low_down(self) -> None:
+        settings = self._editable_settings()
+        value = max(0.0, settings.p_low_cm_h2o - 1.0)
+        self._set_settings(
+            replace(settings, p_low_cm_h2o=value),
+            f"P_low {value:.0f} cmH2O",
+        )
+
+    def action_p_low_up(self) -> None:
+        settings = self._editable_settings()
+        value = min(settings.p_high_cm_h2o - 1.0, settings.p_low_cm_h2o + 1.0)
+        self._set_settings(
+            replace(settings, p_low_cm_h2o=value),
+            f"P_low {value:.0f} cmH2O",
+        )
+
+    def action_t_high_down(self) -> None:
+        settings = self._editable_settings()
+        value = max(0.5, settings.t_high_s - 0.5)
+        self._set_settings(
+            replace(settings, t_high_s=value),
+            f"T_high {value:.1f} s",
+        )
+
+    def action_t_high_up(self) -> None:
+        settings = self._editable_settings()
+        value = min(10.0, settings.t_high_s + 0.5)
+        self._set_settings(
+            replace(settings, t_high_s=value),
+            f"T_high {value:.1f} s",
+        )
+
+    def action_t_low_down(self) -> None:
+        settings = self._editable_settings()
+        value = max(0.2, settings.t_low_s - 0.1)
+        self._set_settings(
+            replace(settings, t_low_s=value),
+            f"T_low {value:.1f} s",
+        )
+
+    def action_t_low_up(self) -> None:
+        settings = self._editable_settings()
+        value = min(2.0, settings.t_low_s + 0.1)
+        self._set_settings(
+            replace(settings, t_low_s=value),
+            f"T_low {value:.1f} s",
         )
 
     def _adjust_selected_control(self, direction: int) -> None:
@@ -497,11 +630,51 @@ class BellowsApp(App[None]):
                 self.action_ie_shorter()
             else:
                 self.action_ie_longer()
+        elif key == "p_high":
+            if direction < 0:
+                self.action_p_high_down()
+            else:
+                self.action_p_high_up()
+        elif key == "p_low":
+            if direction < 0:
+                self.action_p_low_down()
+            else:
+                self.action_p_low_up()
+        elif key == "t_high":
+            if direction < 0:
+                self.action_t_high_down()
+            else:
+                self.action_t_high_up()
+        elif key == "t_low":
+            if direction < 0:
+                self.action_t_low_down()
+            else:
+                self.action_t_low_up()
         elif key == "compliance":
             if direction < 0:
                 self.action_compliance_down()
             else:
                 self.action_compliance_up()
+        elif key == "inflection":
+            if direction < 0:
+                self.action_inflection_down()
+            else:
+                self.action_inflection_up()
+        elif key == "slope":
+            if direction < 0:
+                self.action_slope_down()
+            else:
+                self.action_slope_up()
+        elif key == "recruitable":
+            if direction < 0:
+                self.action_recruitable_down()
+            else:
+                self.action_recruitable_up()
+        elif key == "hysteresis":
+            if direction < 0:
+                self.action_hysteresis_down()
+            else:
+                self.action_hysteresis_up()
         elif key == "resistance":
             if direction < 0:
                 self.action_resistance_down()
@@ -512,14 +685,88 @@ class BellowsApp(App[None]):
             self._refresh_static_panels()
         elif key == "autoscale":
             self._fit_waveform_scales()
-        elif key == "mode":
-            self.message = "Mode: press enter to choose"
+        elif key in ("mode", "lung_model"):
+            label = "Mode" if key == "mode" else "Lung model"
+            self.message = f"{label}: press enter to choose"
             self._refresh_static_panels()
         elif key in self.waveform_visible:
             self._toggle_waveform(key)
 
     def _selected_control_key(self) -> str:
         return self.control_rows[self.selected_control_index].key
+
+    def _rebuild_control_rows(self) -> None:
+        """Build the sidebar row list from current vent mode + lung model.
+
+        APRV swaps target/rr/peep/ie for p_high/p_low/t_high/t_low. The
+        patient section shows model-appropriate rows (Compliance for Linear;
+        Inflection/Slope/Recruitable for Venegas; plus Hysteresis offset for
+        the hysteresis variant). On rebuild we preserve the selected row by
+        key when possible.
+        """
+
+        previous_key = (
+            self.control_rows[self.selected_control_index].key
+            if self.control_rows
+            else "mode"
+        )
+
+        settings = self._editable_settings()
+        mode = settings.mode
+        lung_model_name = self.simulation.patient.lung_model.name
+
+        rows: list[ControlRow] = [ControlRow("mode", "Mode")]
+        if mode == "APRV":
+            rows.extend(
+                [
+                    ControlRow("p_high", "P_high"),
+                    ControlRow("p_low", "P_low"),
+                    ControlRow("t_high", "T_high"),
+                    ControlRow("t_low", "T_low"),
+                ]
+            )
+        else:
+            rows.extend(
+                [
+                    ControlRow("target", "Target"),
+                    ControlRow("rr", "RR"),
+                    ControlRow("peep", "PEEP"),
+                    ControlRow("ie", "I:E"),
+                ]
+            )
+
+        rows.append(ControlRow("lung_model", "Lung model"))
+        rows.append(ControlRow("preset", "Preset"))
+        if lung_model_name == "Linear":
+            rows.append(ControlRow("compliance", "Compliance"))
+        else:
+            rows.extend(
+                [
+                    ControlRow("inflection", "Inflection"),
+                    ControlRow("slope", "Slope"),
+                    ControlRow("recruitable", "Recruitable"),
+                ]
+            )
+            if lung_model_name == "Venegas+H":
+                rows.append(ControlRow("hysteresis", "Hysteresis"))
+        rows.append(ControlRow("resistance", "Resistance"))
+
+        rows.extend(
+            [
+                ControlRow("autoscale", "Fit scales"),
+                ControlRow("pressure", "Pressure"),
+                ControlRow("flow", "Flow"),
+                ControlRow("volume", "Volume"),
+                ControlRow("co2", "CO2 trace"),
+            ]
+        )
+        self.control_rows = rows
+
+        for index, row in enumerate(rows):
+            if row.key == previous_key:
+                self.selected_control_index = index
+                return
+        self.selected_control_index = 0
 
     def _toggle_waveform(self, waveform: str) -> None:
         visible = not self.waveform_visible[waveform]
@@ -550,7 +797,7 @@ class BellowsApp(App[None]):
 
     def _open_mode_picker(self) -> None:
         settings = self._editable_settings()
-        choices = ["VCV", "PCV"]
+        choices = list(MODES)
         current_index = choices.index(settings.mode) if settings.mode in choices else 0
         self.push_screen(
             ChoiceModal("Ventilator mode", choices, current_index=current_index),
@@ -571,12 +818,13 @@ class BellowsApp(App[None]):
         self._set_settings(replace(settings, mode=mode), f"Mode {mode}")
 
     def _open_patient_preset_picker(self) -> None:
-        choices = [preset.name for preset in PATIENT_PRESETS]
-        current_index = (
-            self.patient_preset_index
-            if self.patient_preset_name != "Custom"
-            else 0
-        )
+        presets = presets_for(self.simulation.patient.lung_model.name)
+        choices = [preset.name for preset in presets]
+        current_index = 0
+        for index, preset in enumerate(presets):
+            if preset.name == self.patient_preset_name:
+                current_index = index
+                break
         self.push_screen(
             ChoiceModal("Patient preset", choices, current_index=current_index),
             self._select_patient_preset,
@@ -588,7 +836,8 @@ class BellowsApp(App[None]):
             self._refresh_static_panels()
             return
 
-        for index, preset in enumerate(PATIENT_PRESETS):
+        presets = presets_for(self.simulation.patient.lung_model.name)
+        for index, preset in enumerate(presets):
             if preset.name == preset_name:
                 self.patient_preset_index = index
                 self._apply_patient_preset(preset)
@@ -597,27 +846,60 @@ class BellowsApp(App[None]):
         self.message = "Patient preset unavailable"
         self._refresh_static_panels()
 
-    def _cycle_patient_preset(self, direction: int) -> None:
-        self.patient_preset_index = (
-            self.patient_preset_index + direction
-        ) % len(PATIENT_PRESETS)
-        preset = PATIENT_PRESETS[self.patient_preset_index]
-        self._apply_patient_preset(preset)
+    def _open_lung_model_picker(self) -> None:
+        choices = list(LUNG_MODELS)
+        current_index = (
+            choices.index(self.simulation.patient.lung_model.name)
+            if self.simulation.patient.lung_model.name in choices
+            else 0
+        )
+        self.push_screen(
+            ChoiceModal("Lung model", choices, current_index=current_index),
+            self._select_lung_model,
+        )
+
+    def _select_lung_model(self, name: str | None) -> None:
+        if name is None:
+            self.message = "Lung model unchanged"
+            self._refresh_static_panels()
+            return
+        if name == self.simulation.patient.lung_model.name:
+            self.message = f"Lung model already {name}"
+            self._refresh_static_panels()
+            return
+        presets = presets_for(name)
+        if not presets:
+            self.message = f"No presets for {name}"
+            self._refresh_static_panels()
+            return
+        self.patient_preset_index = 0
+        self._apply_patient_preset(presets[0])
+        self.message = f"Lung model {name}"
+        self._refresh_static_panels()
 
     def _apply_patient_preset(self, preset: PatientPreset) -> None:
+        previous_model = self.simulation.patient.lung_model.name
         self.patient_preset_name = preset.name
         self.simulation.patient = preset.mechanics
+        if preset.mechanics.lung_model.name != previous_model:
+            self._rebuild_control_rows()
         self.message = f"Patient preset {preset.name}"
         self._refresh_static_panels()
 
     def _set_settings(self, settings: VentilatorSettings, message: str) -> None:
+        previous_mode = self._editable_settings().mode
         self.simulation.queue_settings(settings)
+        if settings.mode != previous_mode:
+            self._rebuild_control_rows()
         self.message = f"{message} queued for next breath"
         self._refresh_static_panels()
 
     def _set_patient(self, patient: PatientMechanics, message: str) -> None:
+        previous_model = self.simulation.patient.lung_model.name
         self.simulation.patient = patient
         self.patient_preset_name = "Custom"
+        if patient.lung_model.name != previous_model:
+            self._rebuild_control_rows()
         self.message = message
         self._refresh_static_panels()
 
@@ -678,10 +960,10 @@ class BellowsApp(App[None]):
             0.0,
             self.metrics.current_max_volume_ml - self.metrics.current_min_volume_ml,
         )
+        settings = self.simulation.settings
+        actual_rr_bpm = 60.0 / max(settings.cycle_s, 0.01)
         self.metrics.completed_vt_ml = vt_ml
-        self.metrics.completed_minute_volume_l_min = (
-            vt_ml * self.simulation.settings.rr_bpm / 1000.0
-        )
+        self.metrics.completed_minute_volume_l_min = vt_ml * actual_rr_bpm / 1000.0
         self.metrics.completed_peak_pressure_cm_h2o = (
             self.metrics.current_peak_pressure_cm_h2o
         )
@@ -710,12 +992,7 @@ class BellowsApp(App[None]):
         if self.status is not None:
             pending_note = "no pending changes"
             if pending is not None:
-                pending_note = (
-                    f"pending {pending.mode}  "
-                    f"RR {pending.rr_bpm:.0f}  "
-                    f"PEEP {pending.peep_cm_h2o:.0f}  "
-                    f"I:E {pending.ie_i:.0f}:{pending.ie_e:g}"
-                )
+                pending_note = f"pending {pending.mode}  {self._pending_summary(pending)}"
             self.status.update(
                 "\n".join(
                     [
@@ -747,55 +1024,38 @@ class BellowsApp(App[None]):
                         )
                     )
 
+            ventilator_section = [
+                "[bold #8fa69d]VENTILATOR[/]",
+                self._control_row(
+                    "mode",
+                    "Mode",
+                    self._mode_text(settings, pending),
+                ),
+            ]
+            display_mode = pending.mode if pending is not None else settings.mode
+            if display_mode == "APRV":
+                ventilator_section.extend(self._aprv_rows(settings, pending))
+            else:
+                ventilator_section.extend(
+                    self._conventional_rows(settings, pending, pending_target_lines)
+                )
+
             sidebar_markup = "\n".join(
                 [
-                    "[bold #8fa69d]VENTILATOR[/]",
-                    self._control_row(
-                        "mode",
-                        "Mode",
-                        self._mode_text(settings, pending),
-                    ),
-                    self._control_row(
-                        "target",
-                        "Target",
-                        self._target_status(settings),
-                    ),
-                    *pending_target_lines,
-                    self._control_row(
-                        "rr",
-                        "RR",
-                        self._setting_text(
-                            settings.rr_bpm,
-                            pending.rr_bpm if pending else None,
-                            " /min",
-                        ),
-                    ),
-                    self._control_row(
-                        "peep",
-                        "PEEP",
-                        self._setting_text(
-                            settings.peep_cm_h2o,
-                            pending.peep_cm_h2o if pending else None,
-                            " cmH2O",
-                        ),
-                    ),
-                    self._control_row(
-                        "ie",
-                        "I:E",
-                        self._ie_text(settings.ie_e, pending.ie_e if pending else None),
-                    ),
+                    *ventilator_section,
                     "",
                     "[bold #8fa69d]PATIENT[/]",
+                    self._control_row(
+                        "lung_model",
+                        "Lung model",
+                        patient.lung_model.name,
+                    ),
                     self._control_row(
                         "preset",
                         "Preset",
                         self.patient_preset_name,
                     ),
-                    self._control_row(
-                        "compliance",
-                        "Compliance",
-                        f"{patient.compliance_l_per_cm_h2o * 1000:.0f} mL/cmH2O",
-                    ),
+                    *self._lung_model_rows(patient.lung_model),
                     self._control_row(
                         "resistance",
                         "Resistance",
@@ -929,6 +1189,9 @@ class BellowsApp(App[None]):
     def _target_status(self, settings: VentilatorSettings) -> str:
         if settings.mode == "PCV":
             return f"Pinsp {settings.pinsp_cm_h2o:.0f} cmH2O"
+        if settings.mode == "PRVC":
+            applied = self.simulation.modes["PRVC"].applied_pinsp_cm_h2o
+            return f"VT {settings.vt_ml:.0f} mL (applied {applied:.0f})"
         return f"VT {settings.vt_ml:.0f} mL"
 
     def _visible_text(self, waveform: str) -> str:
@@ -948,6 +1211,138 @@ class BellowsApp(App[None]):
         if pending_e is None or pending_e == active_e:
             return active_text
         return f"{active_text} -> 1:{pending_e:g}"
+
+    def _pending_summary(self, pending: VentilatorSettings) -> str:
+        if pending.mode == "APRV":
+            return (
+                f"P_high {pending.p_high_cm_h2o:.0f}  "
+                f"P_low {pending.p_low_cm_h2o:.0f}  "
+                f"T_high {pending.t_high_s:.1f}  "
+                f"T_low {pending.t_low_s:.1f}"
+            )
+        return (
+            f"RR {pending.rr_bpm:.0f}  "
+            f"PEEP {pending.peep_cm_h2o:.0f}  "
+            f"I:E {pending.ie_i:.0f}:{pending.ie_e:g}"
+        )
+
+    def _conventional_rows(
+        self,
+        settings: VentilatorSettings,
+        pending: VentilatorSettings | None,
+        pending_target_lines: list[str],
+    ) -> list[str]:
+        return [
+            self._control_row(
+                "target",
+                "Target",
+                self._target_status(settings),
+            ),
+            *pending_target_lines,
+            self._control_row(
+                "rr",
+                "RR",
+                self._setting_text(
+                    settings.rr_bpm,
+                    pending.rr_bpm if pending else None,
+                    " /min",
+                ),
+            ),
+            self._control_row(
+                "peep",
+                "PEEP",
+                self._setting_text(
+                    settings.peep_cm_h2o,
+                    pending.peep_cm_h2o if pending else None,
+                    " cmH2O",
+                ),
+            ),
+            self._control_row(
+                "ie",
+                "I:E",
+                self._ie_text(settings.ie_e, pending.ie_e if pending else None),
+            ),
+        ]
+
+    def _lung_model_rows(self, lung_model: LungModel) -> list[str]:
+        if isinstance(lung_model, LinearLung):
+            return [
+                self._control_row(
+                    "compliance",
+                    "Compliance",
+                    f"{lung_model.compliance_l_per_cm_h2o * 1000:.0f} mL/cmH2O",
+                )
+            ]
+        rows = [
+            self._control_row(
+                "inflection",
+                "Inflection",
+                f"{lung_model.inflection_cm_h2o:.0f} cmH2O",
+            ),
+            self._control_row(
+                "slope",
+                "Slope",
+                f"{lung_model.slope_width_cm_h2o:.1f} cmH2O",
+            ),
+            self._control_row(
+                "recruitable",
+                "Recruitable",
+                f"{lung_model.recruitable_volume_l * 1000:.0f} mL",
+            ),
+        ]
+        if isinstance(lung_model, VenegasHysteresisLung):
+            rows.append(
+                self._control_row(
+                    "hysteresis",
+                    "Hysteresis",
+                    f"{lung_model.hysteresis_offset_cm_h2o:.1f} cmH2O",
+                )
+            )
+        return rows
+
+    def _aprv_rows(
+        self,
+        settings: VentilatorSettings,
+        pending: VentilatorSettings | None,
+    ) -> list[str]:
+        return [
+            self._control_row(
+                "p_high",
+                "P_high",
+                self._setting_text(
+                    settings.p_high_cm_h2o,
+                    pending.p_high_cm_h2o if pending else None,
+                    " cmH2O",
+                ),
+            ),
+            self._control_row(
+                "p_low",
+                "P_low",
+                self._setting_text(
+                    settings.p_low_cm_h2o,
+                    pending.p_low_cm_h2o if pending else None,
+                    " cmH2O",
+                ),
+            ),
+            self._control_row(
+                "t_high",
+                "T_high",
+                self._setting_text(
+                    settings.t_high_s,
+                    pending.t_high_s if pending else None,
+                    " s",
+                ),
+            ),
+            self._control_row(
+                "t_low",
+                "T_low",
+                self._setting_text(
+                    settings.t_low_s,
+                    pending.t_low_s if pending else None,
+                    " s",
+                ),
+            ),
+        ]
 
 
 def main() -> None:
