@@ -8,6 +8,8 @@ It is intended for education, demonstration, and experimentation. It is **not** 
 
 > Mechanical ventilation in your terminal.
 
+![](bellows.webp)
+
 ---
 
 ## Current Status
