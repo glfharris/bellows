@@ -22,9 +22,11 @@ Current capabilities:
 - pressure, flow, and volume waveforms shown by default
 - optional CO2 waveform, hidden by default
 - fixed time axis and vertical scale on traces
+- one-shot waveform scale fitting
 - selectable left control panel
 - pause/resume and reset
 - live ventilator and patient setting adjustment
+- patient mechanics presets
 - breath-boundary application for ventilator setting changes
 - monitor numerics from the last completed breath:
   - Ppeak
@@ -54,7 +56,7 @@ The left panel is the main control surface.
 | --- | --- |
 | `up` / `down` | Select a row in the left control panel |
 | `left` / `right` | Decrease / increase the selected setting |
-| `enter` | Toggle the selected row, such as mode or waveform visibility |
+| `enter` | Open a picker or toggle the selected row, such as mode, preset, or waveform visibility |
 | `space` | Pause / resume |
 | `tab` | Show / hide the left control panel |
 | `r` | Reset simulation |
@@ -109,8 +111,19 @@ Where:
 
 Adjustable patient parameters:
 
+- preset
 - compliance
 - resistance
+
+Built-in presets:
+
+- Normal
+- Stiff
+- Restrictive
+- Obstructed
+- Severe obstruction
+
+Manual compliance or resistance edits change the displayed preset to `Custom`.
 
 CO2 is currently a simplified capnography trace with EtCO2 shown in kPa.
 
@@ -131,6 +144,7 @@ The waveform view includes:
 
 - rolling fixed-width time axis
 - vertical scale
+- fixed y-axis ranges with a panel action to fit scales to current traces
 - smoother braille-cell trace rendering
 - selectable visibility for each waveform
 
@@ -200,7 +214,7 @@ Near-term:
 
 - Add focused tests for simulation mechanics and mode switching
 - Improve PCV/VCV transition behavior and pending-setting display
-- Add patient presets such as normal, stiff lung, and obstructed lung
+- Add richer patient presets and teaching notes
 - Add event injection for bronchospasm, leak, and circuit disconnect
 - Add an event log and waveform markers
 - Improve layout behavior on narrow terminals

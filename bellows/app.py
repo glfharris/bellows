@@ -7,10 +7,12 @@ from dataclasses import dataclass, replace
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Static
+from textual.containers import Container, Horizontal, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Footer, OptionList, Static
 
 from bellows.simulation.engine import VentilationSimulation
+from bellows.simulation.presets import PATIENT_PRESETS, PatientPreset
 from bellows.simulation.state import (
     PatientMechanics,
     SimulationSample,
@@ -37,6 +39,79 @@ class BreathMetrics:
 class ControlRow:
     key: str
     label: str
+
+
+class ChoiceModal(ModalScreen[str | None]):
+    """Small modal picker for settings with discrete choices."""
+
+    CSS = """
+    ChoiceModal {
+        align: center middle;
+    }
+
+    #choice-dialog {
+        width: 38;
+        height: auto;
+        background: #0d1412;
+        border: solid #f0b36a;
+        padding: 1;
+    }
+
+    #choice-title {
+        height: 1;
+        color: #f0b36a;
+        text-style: bold;
+    }
+
+    #choice-help {
+        height: 1;
+        color: #748179;
+    }
+
+    OptionList {
+        height: auto;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    def __init__(
+        self,
+        title: str,
+        choices: list[str],
+        *,
+        current_index: int = 0,
+    ) -> None:
+        super().__init__()
+        self.title_text = title
+        self.choices = choices
+        self.current_index = current_index
+        self.option_list: OptionList | None = None
+
+    def compose(self) -> ComposeResult:
+        with Container(id="choice-dialog"):
+            yield Static(self.title_text, id="choice-title")
+            self.option_list = OptionList(*self.choices, id="choice-options")
+            yield self.option_list
+            yield Static("up/down select  enter choose  esc cancel", id="choice-help")
+
+    def on_mount(self) -> None:
+        if self.option_list is not None:
+            self.option_list.highlighted = self.current_index
+            self.option_list.focus()
+
+    def on_option_list_option_selected(
+        self,
+        event: OptionList.OptionSelected,
+    ) -> None:
+        event.stop()
+        self.dismiss(self.choices[event.option_index])
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class BellowsApp(App[None]):
@@ -182,14 +257,18 @@ class BellowsApp(App[None]):
             ControlRow("rr", "RR"),
             ControlRow("peep", "PEEP"),
             ControlRow("ie", "I:E"),
+            ControlRow("preset", "Preset"),
             ControlRow("compliance", "Compliance"),
             ControlRow("resistance", "Resistance"),
+            ControlRow("autoscale", "Fit scales"),
             ControlRow("pressure", "Pressure"),
             ControlRow("flow", "Flow"),
             ControlRow("volume", "Volume"),
             ControlRow("co2", "CO2 trace"),
         ]
         self.selected_control_index = 0
+        self.patient_preset_index = 0
+        self.patient_preset_name = PATIENT_PRESETS[self.patient_preset_index].name
         self.metrics = BreathMetrics()
         self.message = "Ready"
 
@@ -201,11 +280,11 @@ class BellowsApp(App[None]):
                 yield Static(id="status")
                 yield Static(id="numerics")
                 pressure = WaveformWidget(
-                    WaveformSpec("Pressure", "cmH2O", "#f5c451", 0.0, 40.0),
+                    WaveformSpec("Pressure", "cmH2O", "#f5c451", 0.0, 60.0),
                     id="pressure",
                 )
                 flow = WaveformWidget(
-                    WaveformSpec("Flow", "L/min", "#57c7ff", -60.0, 60.0),
+                    WaveformSpec("Flow", "L/min", "#57c7ff", -180.0, 80.0),
                     id="flow",
                 )
                 volume = WaveformWidget(
@@ -274,7 +353,11 @@ class BellowsApp(App[None]):
     def action_activate_selected_control(self) -> None:
         key = self._selected_control_key()
         if key == "mode":
-            self.action_toggle_mode()
+            self._open_mode_picker()
+        elif key == "preset":
+            self._open_patient_preset_picker()
+        elif key == "autoscale":
+            self._fit_waveform_scales()
         elif key in self.waveform_visible:
             self._toggle_waveform(key)
         else:
@@ -424,8 +507,14 @@ class BellowsApp(App[None]):
                 self.action_resistance_down()
             else:
                 self.action_resistance_up()
+        elif key == "preset":
+            self.message = "Preset: press enter to choose"
+            self._refresh_static_panels()
+        elif key == "autoscale":
+            self._fit_waveform_scales()
         elif key == "mode":
-            self.action_toggle_mode()
+            self.message = "Mode: press enter to choose"
+            self._refresh_static_panels()
         elif key in self.waveform_visible:
             self._toggle_waveform(key)
 
@@ -452,6 +541,75 @@ class BellowsApp(App[None]):
     def _visible_waveform_count(self) -> int:
         return sum(1 for visible in self.waveform_visible.values() if visible)
 
+    def _fit_waveform_scales(self) -> None:
+        for widget in self.waveforms.values():
+            widget.fit_scale_to_points()
+        self.message = "Waveform scales fitted"
+        self._refresh_waveforms()
+        self._refresh_static_panels()
+
+    def _open_mode_picker(self) -> None:
+        settings = self._editable_settings()
+        choices = ["VCV", "PCV"]
+        current_index = choices.index(settings.mode) if settings.mode in choices else 0
+        self.push_screen(
+            ChoiceModal("Ventilator mode", choices, current_index=current_index),
+            self._select_mode,
+        )
+
+    def _select_mode(self, mode: str | None) -> None:
+        if mode is None:
+            self.message = "Mode unchanged"
+            self._refresh_static_panels()
+            return
+
+        settings = self._editable_settings()
+        if mode == settings.mode:
+            self.message = f"Mode already {mode}"
+            self._refresh_static_panels()
+            return
+        self._set_settings(replace(settings, mode=mode), f"Mode {mode}")
+
+    def _open_patient_preset_picker(self) -> None:
+        choices = [preset.name for preset in PATIENT_PRESETS]
+        current_index = (
+            self.patient_preset_index
+            if self.patient_preset_name != "Custom"
+            else 0
+        )
+        self.push_screen(
+            ChoiceModal("Patient preset", choices, current_index=current_index),
+            self._select_patient_preset,
+        )
+
+    def _select_patient_preset(self, preset_name: str | None) -> None:
+        if preset_name is None:
+            self.message = "Patient preset unchanged"
+            self._refresh_static_panels()
+            return
+
+        for index, preset in enumerate(PATIENT_PRESETS):
+            if preset.name == preset_name:
+                self.patient_preset_index = index
+                self._apply_patient_preset(preset)
+                return
+
+        self.message = "Patient preset unavailable"
+        self._refresh_static_panels()
+
+    def _cycle_patient_preset(self, direction: int) -> None:
+        self.patient_preset_index = (
+            self.patient_preset_index + direction
+        ) % len(PATIENT_PRESETS)
+        preset = PATIENT_PRESETS[self.patient_preset_index]
+        self._apply_patient_preset(preset)
+
+    def _apply_patient_preset(self, preset: PatientPreset) -> None:
+        self.patient_preset_name = preset.name
+        self.simulation.patient = preset.mechanics
+        self.message = f"Patient preset {preset.name}"
+        self._refresh_static_panels()
+
     def _set_settings(self, settings: VentilatorSettings, message: str) -> None:
         self.simulation.queue_settings(settings)
         self.message = f"{message} queued for next breath"
@@ -459,6 +617,7 @@ class BellowsApp(App[None]):
 
     def _set_patient(self, patient: PatientMechanics, message: str) -> None:
         self.simulation.patient = patient
+        self.patient_preset_name = "Custom"
         self.message = message
         self._refresh_static_panels()
 
@@ -567,7 +726,7 @@ class BellowsApp(App[None]):
                         ),
                         (
                             f"{self.message}  |  up/down select  left/right adjust  "
-                            "enter toggle  space pause  tab panel  r reset  q quit"
+                            "enter choose/toggle  space pause  tab panel  r reset  q quit"
                         ),
                     ]
                 )
@@ -628,6 +787,11 @@ class BellowsApp(App[None]):
                     "",
                     "[bold #8fa69d]PATIENT[/]",
                     self._control_row(
+                        "preset",
+                        "Preset",
+                        self.patient_preset_name,
+                    ),
+                    self._control_row(
                         "compliance",
                         "Compliance",
                         f"{patient.compliance_l_per_cm_h2o * 1000:.0f} mL/cmH2O",
@@ -640,6 +804,11 @@ class BellowsApp(App[None]):
                     f"  EtCO2      [#f4f7f5]{patient.etco2_kpa:.1f} kPa[/]",
                     "",
                     "[bold #8fa69d]WAVEFORMS[/]",
+                    self._control_row(
+                        "autoscale",
+                        "Fit scales",
+                        "now",
+                    ),
                     self._control_row(
                         "pressure",
                         "Pressure",
@@ -668,7 +837,7 @@ class BellowsApp(App[None]):
                     "[bold #8fa69d]CONTROLS[/]",
                     "up/down    select",
                     "left/right adjust",
-                    "enter      toggle",
+                    "enter      choose/toggle",
                     "space      pause/resume",
                     "tab        show/hide panel",
                     "r          reset",

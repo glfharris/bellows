@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil, floor, log10
 
 from rich.console import RenderableType
 from rich.text import Text
@@ -38,6 +39,8 @@ class WaveformWidget(Widget):
         self.latest: float = 0.0
         self.window_start_s = 0.0
         self.window_end_s = 0.0
+        self.minimum = spec.minimum
+        self.maximum = spec.maximum
 
     def update_points(
         self,
@@ -53,6 +56,32 @@ class WaveformWidget(Widget):
             self.latest = points[-1].value
         self.refresh()
 
+    def fit_scale_to_points(self) -> None:
+        """Set y-axis limits from current points using rounded bounds."""
+        if not self.points:
+            self.minimum = self.spec.minimum
+            self.maximum = self.spec.maximum
+            self.refresh()
+            return
+
+        values = [point.value for point in self.points]
+        minimum = min(values)
+        maximum = max(values)
+
+        if self.spec.minimum >= 0:
+            minimum = min(0.0, minimum)
+        if self.spec.minimum < 0 < self.spec.maximum:
+            minimum = min(minimum, 0.0)
+            maximum = max(maximum, 0.0)
+
+        self.minimum, self.maximum = self._nice_bounds(minimum, maximum)
+        self.refresh()
+
+    def reset_scale(self) -> None:
+        self.minimum = self.spec.minimum
+        self.maximum = self.spec.maximum
+        self.refresh()
+
     def render(self) -> RenderableType:
         total_width = max(12, self.size.width - 2)
         scale_width = self._scale_width()
@@ -64,7 +93,7 @@ class WaveformWidget(Widget):
         label = (
             f"{self.spec.title:<9} "
             f"{self.latest:>5.1f} {self.spec.unit:<6} "
-            f"[{self.spec.minimum:g}-{self.spec.maximum:g}]"
+            f"[{self.minimum:g}-{self.maximum:g}]"
         )
         text.append(label[: max(0, self.size.width)], style=f"bold {self.spec.color}")
         text.append("\n")
@@ -116,8 +145,8 @@ class WaveformWidget(Widget):
         x_fraction = (point.time_s - self.window_start_s) / time_range
         x = round(max(0.0, min(1.0, x_fraction)) * (sub_width - 1))
 
-        value_range = max(self.spec.maximum - self.spec.minimum, 0.001)
-        y_fraction = (point.value - self.spec.minimum) / value_range
+        value_range = max(self.maximum - self.minimum, 0.001)
+        y_fraction = (point.value - self.minimum) / value_range
         y_fraction = max(0.0, min(1.0, y_fraction))
         y = round((1.0 - y_fraction) * (sub_height - 1))
         return x, y
@@ -173,11 +202,11 @@ class WaveformWidget(Widget):
         return bits[(sub_x, sub_y)]
 
     def _scale_width(self) -> int:
-        midpoint = (self.spec.minimum + self.spec.maximum) / 2
+        midpoint = (self.minimum + self.maximum) / 2
         labels = [
-            self._format_scale_value(self.spec.maximum),
+            self._format_scale_value(self.maximum),
             self._format_scale_value(midpoint),
-            self._format_scale_value(self.spec.minimum),
+            self._format_scale_value(self.minimum),
         ]
         return max(len(label) for label in labels) + 1
 
@@ -188,15 +217,54 @@ class WaveformWidget(Widget):
 
         midpoint_row = height // 2
         if row == 0:
-            value = self.spec.maximum
+            value = self.maximum
         elif row == midpoint_row:
-            value = (self.spec.minimum + self.spec.maximum) / 2
+            value = (self.minimum + self.maximum) / 2
         elif row == height - 1:
-            value = self.spec.minimum
+            value = self.minimum
         else:
             return " " * width
 
         return self._format_scale_value(value).rjust(width)
+
+    def _nice_bounds(self, minimum: float, maximum: float) -> tuple[float, float]:
+        span = maximum - minimum
+        if span <= 0:
+            span = max(abs(maximum), 1.0)
+            minimum -= span * 0.5
+            maximum += span * 0.5
+        else:
+            padding = span * 0.10
+            minimum -= padding
+            maximum += padding
+
+        span = max(maximum - minimum, 0.001)
+        step = self._nice_step(span / 4)
+        nice_minimum = floor(minimum / step) * step
+        nice_maximum = ceil(maximum / step) * step
+
+        if self.spec.minimum >= 0:
+            nice_minimum = max(0.0, nice_minimum)
+        if self.spec.minimum < 0 < self.spec.maximum:
+            nice_minimum = min(nice_minimum, 0.0)
+            nice_maximum = max(nice_maximum, 0.0)
+        if nice_minimum == nice_maximum:
+            nice_maximum = nice_minimum + step
+        return nice_minimum, nice_maximum
+
+    def _nice_step(self, value: float) -> float:
+        exponent = floor(log10(max(value, 0.001)))
+        base = 10**exponent
+        fraction = value / base
+        if fraction <= 1:
+            nice_fraction = 1
+        elif fraction <= 2:
+            nice_fraction = 2
+        elif fraction <= 5:
+            nice_fraction = 5
+        else:
+            nice_fraction = 10
+        return nice_fraction * base
 
     def _format_scale_value(self, value: float) -> str:
         if abs(value) >= 10 or value == 0:
