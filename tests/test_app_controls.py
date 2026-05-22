@@ -43,7 +43,7 @@ class AppControlTests(unittest.TestCase):
 
     def test_aprv_and_hysteresis_rows_come_from_catalog(self) -> None:
         app = BellowsApp()
-        app.simulation.queue_settings(replace(app.simulation.settings, mode="APRV"))
+        app.simulation.settings = replace(app.simulation.settings, mode="APRV")
         app.simulation.patient = replace(
             app.simulation.patient,
             lung_model=VenegasHysteresisLung(),
@@ -57,6 +57,62 @@ class AppControlTests(unittest.TestCase):
         self.assertIn("hysteresis", keys)
         self.assertNotIn("target", keys)
         self.assertNotIn("compliance", keys)
+
+    def test_ventilator_rows_use_mode_control_keys(self) -> None:
+        app = BellowsApp()
+        app.simulation.settings = replace(app.simulation.settings, mode="APRV")
+        app._rebuild_control_rows()
+
+        mode = app.simulation.mode_for("APRV")
+        keys = [row.key for row in app.control_rows]
+
+        for key in mode.control_keys:
+            self.assertIn(key, keys)
+        self.assertNotIn("target", keys)
+
+    def test_pending_mode_change_keeps_active_mode_controls_visible(self) -> None:
+        app = BellowsApp()
+        app.simulation.queue_settings(replace(app.simulation.settings, mode="APRV"))
+        app._rebuild_control_rows()
+
+        keys = [row.key for row in app.control_rows]
+
+        self.assertIn("target", keys)
+        self.assertIn("rr", keys)
+        self.assertNotIn("p_high", keys)
+
+    def test_pending_mode_change_blocks_active_control_adjustment(self) -> None:
+        app = BellowsApp()
+        app.simulation.queue_settings(replace(app.simulation.settings, mode="APRV"))
+        _select_control(app, "target")
+
+        app._adjust_selected_control(1)
+
+        self.assertEqual(app.simulation.pending_settings.mode, "APRV")
+        self.assertEqual(app.simulation.pending_settings.vt_ml, 500.0)
+        self.assertEqual(app.message, "Mode change pending; wait for next breath")
+
+    def test_pending_mode_change_blocks_direct_setting_shortcut(self) -> None:
+        app = BellowsApp()
+        app.simulation.queue_settings(replace(app.simulation.settings, mode="APRV"))
+
+        app.action_target_up()
+
+        self.assertEqual(app.simulation.pending_settings.mode, "APRV")
+        self.assertEqual(app.simulation.pending_settings.vt_ml, 500.0)
+        self.assertEqual(app.message, "Mode change pending; wait for next breath")
+
+    def test_mode_specific_target_label_is_used_for_rows(self) -> None:
+        app = BellowsApp()
+        app.simulation.settings = replace(app.simulation.settings, mode="PCV")
+
+        rows = app._ventilator_rows(
+            app.simulation.mode_for("PCV"),
+            app.simulation.settings,
+            None,
+        )
+
+        self.assertTrue(rows[0].startswith("  Pinsp"))
 
     def test_selected_control_adjust_uses_catalog_action(self) -> None:
         app = BellowsApp()

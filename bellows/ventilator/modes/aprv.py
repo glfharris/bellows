@@ -19,6 +19,15 @@ from bellows.ventilator.modes.base import (
 
 class AirwayPressureReleaseVentilation(VentilatorMode):
     name = "APRV"
+    control_keys = ("p_high", "p_low", "t_high", "t_low")
+
+    def pending_summary(self, settings: VentilatorSettings) -> str:
+        return (
+            f"P_high {settings.p_high_cm_h2o:.0f}  "
+            f"P_low {settings.p_low_cm_h2o:.0f}  "
+            f"T_high {settings.t_high_s:.1f}  "
+            f"T_low {settings.t_low_s:.1f}"
+        )
 
     def step(
         self,

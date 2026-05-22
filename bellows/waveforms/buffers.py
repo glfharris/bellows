@@ -32,8 +32,5 @@ class TraceBuffer:
     def points_since(self, earliest_time_s: float) -> list[TracePoint]:
         return [point for point in self.points if point.time_s >= earliest_time_s]
 
-    def values_since(self, earliest_time_s: float) -> list[float]:
-        return [point.value for point in self.points if point.time_s >= earliest_time_s]
-
     def __iter__(self) -> Iterable[TracePoint]:
         return iter(self.points)

@@ -14,6 +14,11 @@ from bellows.ventilator.modes.base import (
 
 class PressureControl(VentilatorMode):
     name = "PCV"
+    control_keys = ("target", "rr", "peep", "ie")
+    control_labels = {"target": "Pinsp"}
+
+    def target_status(self, settings: VentilatorSettings) -> str:
+        return f"Pinsp {settings.pinsp_cm_h2o:.0f} cmH2O"
 
     def step(
         self,

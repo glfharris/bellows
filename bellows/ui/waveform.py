@@ -24,6 +24,8 @@ class WaveformSpec:
 class WaveformWidget(Widget):
     """Compact rolling trace renderer."""
 
+    SCALE_WIDTH = 6
+
     DEFAULT_CSS = """
     WaveformWidget {
         height: 1fr;
@@ -202,13 +204,7 @@ class WaveformWidget(Widget):
         return bits[(sub_x, sub_y)]
 
     def _scale_width(self) -> int:
-        midpoint = (self.minimum + self.maximum) / 2
-        labels = [
-            self._format_scale_value(self.maximum),
-            self._format_scale_value(midpoint),
-            self._format_scale_value(self.minimum),
-        ]
-        return max(len(label) for label in labels) + 1
+        return self.SCALE_WIDTH
 
     def _scale_label(self, row: int, height: int, width: int) -> str:
         if height <= 1:

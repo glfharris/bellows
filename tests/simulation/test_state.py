@@ -76,6 +76,8 @@ class VentilationSimulationStateTests(unittest.TestCase):
         run_for_seconds(sim, 2.0)
         self.assertGreater(sim.time_s, 0.0)
         self.assertIsNotNone(sim.pending_settings)
+        run_for_seconds(sim, 4.0)
+        self.assertIsNotNone(sim.last_breath_summary)
 
         sim.reset()
 
@@ -83,7 +85,22 @@ class VentilationSimulationStateTests(unittest.TestCase):
         self.assertEqual(sim.breath_time_s, 0.0)
         self.assertEqual(sim.breath, 0)
         self.assertIsNone(sim.pending_settings)
+        self.assertIsNone(sim.last_breath_summary)
+        self.assertEqual(len(sim.breath_history), 0)
         self.assertAlmostEqual(sim.lung_volume_l, 0.4)
+
+    def test_completed_breaths_are_stored_in_history(self) -> None:
+        sim = VentilationSimulation(settings=VentilatorSettings(rr_bpm=12.0))
+
+        run_for_seconds(sim, 12.0)
+
+        self.assertGreaterEqual(len(sim.breath_history), 2)
+        summary = sim.last_breath_summary
+        self.assertIsNotNone(summary)
+        assert summary is not None
+        self.assertEqual(summary.breath, 1)
+        self.assertGreater(summary.vt_ml, 0.0)
+        self.assertGreater(summary.peak_pressure_cm_h2o, 0.0)
 
     def test_unknown_mode_raises_clear_error(self) -> None:
         sim = VentilationSimulation(settings=VentilatorSettings(mode="NOPE"))

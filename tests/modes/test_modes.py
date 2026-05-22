@@ -179,5 +179,50 @@ class ModeSwitchTests(unittest.TestCase):
         self.assertEqual(sim.settings.mode, "PCV")
 
 
+class ModeMetadataTests(unittest.TestCase):
+    def test_mode_control_keys_describe_ventilator_setting_rows(self) -> None:
+        sim = VentilationSimulation()
+
+        self.assertEqual(
+            sim.mode_for("VCV").control_keys,
+            ("target", "rr", "peep", "ie"),
+        )
+        self.assertEqual(
+            sim.mode_for("PCV").control_keys,
+            ("target", "rr", "peep", "ie"),
+        )
+        self.assertEqual(
+            sim.mode_for("PRVC").control_keys,
+            ("target", "rr", "peep", "ie"),
+        )
+        self.assertEqual(
+            sim.mode_for("APRV").control_keys,
+            ("p_high", "p_low", "t_high", "t_low"),
+        )
+
+    def test_modes_can_override_control_labels(self) -> None:
+        sim = VentilationSimulation()
+
+        self.assertEqual(sim.mode_for("VCV").control_label("target"), "VT target")
+        self.assertEqual(sim.mode_for("PCV").control_label("target"), "Pinsp")
+        self.assertEqual(sim.mode_for("PRVC").control_label("target"), "VT target")
+
+    def test_mode_target_and_pending_summary_text_is_mode_owned(self) -> None:
+        sim = VentilationSimulation()
+
+        self.assertEqual(
+            sim.mode_for("PCV").target_status(VentilatorSettings(mode="PCV")),
+            "Pinsp 15 cmH2O",
+        )
+        self.assertEqual(
+            sim.mode_for("VCV").pending_summary(VentilatorSettings(mode="VCV")),
+            "RR 14  PEEP 5  I:E 1:2",
+        )
+        self.assertEqual(
+            sim.mode_for("APRV").pending_summary(VentilatorSettings(mode="APRV")),
+            "P_high 25  P_low 5  T_high 4.0  T_low 0.6",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

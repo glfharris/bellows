@@ -178,7 +178,7 @@ uv run python -m unittest discover tests
 Quick compile check:
 
 ```bash
-uv run python -m compileall bellows main.py tests
+uv run python -m compileall bellows tests
 ```
 
 Planned work, known limitations, and future-feature notes live in [TODO.md](TODO.md).

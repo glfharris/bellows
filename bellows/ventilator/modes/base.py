@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bellows.simulation.metrics import BreathSummary
 from bellows.simulation.phase import PHASE_EXPIRATION, PHASE_INSPIRATION
 from bellows.simulation.state import PatientMechanics, VentilatorSettings
 
@@ -25,19 +26,25 @@ class ModeStep:
     lung_volume_l: float
 
 
-@dataclass(frozen=True)
-class LastBreathStats:
-    """Summary of the breath that just completed."""
-
-    delivered_vt_l: float
-    peak_volume_l: float
-    peak_pressure_cm_h2o: float
-
-
 class VentilatorMode:
     """Base class for ventilator modes."""
 
     name: str = "BASE"
+    control_keys: tuple[str, ...] = ()
+    control_labels: dict[str, str] = {}
+
+    def control_label(self, key: str) -> str | None:
+        return self.control_labels.get(key)
+
+    def target_status(self, settings: VentilatorSettings) -> str:
+        return f"VT {settings.vt_ml:.0f} mL"
+
+    def pending_summary(self, settings: VentilatorSettings) -> str:
+        return (
+            f"RR {settings.rr_bpm:.0f}  "
+            f"PEEP {settings.peep_cm_h2o:.0f}  "
+            f"I:E {settings.ie_i:.0f}:{settings.ie_e:g}"
+        )
 
     def on_activate(self, settings: VentilatorSettings) -> None:
         """Called when this mode becomes active. Reset any internal state."""
@@ -46,7 +53,7 @@ class VentilatorMode:
         self,
         settings: VentilatorSettings,
         patient: PatientMechanics,
-        stats: LastBreathStats,
+        stats: BreathSummary,
     ) -> None:
         """Called at the end of each breath with the breath's stats."""
 

@@ -7,10 +7,10 @@ breaths so the delivered tidal volume tracks ``settings.vt_ml``.
 
 from __future__ import annotations
 
+from bellows.simulation.metrics import BreathSummary
 from bellows.simulation.phase import PHASE_INSPIRATION
 from bellows.simulation.state import PatientMechanics, VentilatorSettings
 from bellows.ventilator.modes.base import (
-    LastBreathStats,
     ModeStep,
     VentilatorMode,
     passive_expiration,
@@ -25,10 +25,15 @@ MAX_STEP_CM_H2O = 3.0
 
 class PressureRegulatedVolumeControl(VentilatorMode):
     name = "PRVC"
+    control_keys = ("target", "rr", "peep", "ie")
+    control_labels = {"target": "VT target"}
 
     def __init__(self) -> None:
         # on_activate overwrites this from settings before the first step.
         self.applied_pinsp_cm_h2o: float = 15.0
+
+    def target_status(self, settings: VentilatorSettings) -> str:
+        return f"VT {settings.vt_ml:.0f} mL (applied {self.applied_pinsp_cm_h2o:.0f})"
 
     def on_activate(self, settings: VentilatorSettings) -> None:
         self.applied_pinsp_cm_h2o = _clamp(
@@ -41,7 +46,7 @@ class PressureRegulatedVolumeControl(VentilatorMode):
         self,
         settings: VentilatorSettings,
         patient: PatientMechanics,
-        stats: LastBreathStats,
+        stats: BreathSummary,
     ) -> None:
         target_vt_l = settings.vt_l
         if target_vt_l <= 0.0 or stats.delivered_vt_l <= 0.0:

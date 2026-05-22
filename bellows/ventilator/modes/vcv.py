@@ -14,6 +14,8 @@ from bellows.ventilator.modes.base import (
 
 class VolumeControl(VentilatorMode):
     name = "VCV"
+    control_keys = ("target", "rr", "peep", "ie")
+    control_labels = {"target": "VT target"}
 
     def step(
         self,
