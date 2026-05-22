@@ -71,9 +71,9 @@ events:
 Directional behaviours worth covering as the project grows:
 
 - lower compliance should increase VCV peak pressure ✓
-- higher resistance should alter inspiratory and expiratory flow
-- higher PEEP should raise baseline pressure
-- higher VT should increase delivered volume and pressure in VCV
+- higher resistance should alter inspiratory and expiratory flow ✓
+- higher PEEP should raise baseline pressure ✓
+- higher VT should increase delivered volume and pressure in VCV ✓
 - higher Pinsp should increase delivered volume in PCV ✓
 - PRVC applied Pinsp should converge so delivered VT tracks the target ✓
 - PRVC applied Pinsp should drop when PEEP recruits a Venegas lung ✓

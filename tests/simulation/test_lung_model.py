@@ -14,14 +14,7 @@ from bellows.simulation.lung_model import (
     VenegasLung,
 )
 from bellows.simulation.state import PatientMechanics, VentilatorSettings
-
-
-def _peak_pressure(sim: VentilationSimulation, seconds: float = 15.0) -> float:
-    peak = 0.0
-    for _ in range(int(seconds / 0.01)):
-        sample = sim.step(0.01)
-        peak = max(peak, sample.pressure_cm_h2o)
-    return peak
+from tests.helpers import peak_pressure, run_for_seconds
 
 
 class LinearLungTests(unittest.TestCase):
@@ -86,13 +79,13 @@ class SimulationIntegrationTests(unittest.TestCase):
         # is poor — VCV pushing 500 mL needs more pressure than against a
         # linear lung with the same overall compliance scale.
         common = VentilatorSettings(mode="VCV", vt_ml=500.0)
-        linear_peak = _peak_pressure(
+        linear_peak = peak_pressure(
             VentilationSimulation(
                 settings=common,
                 patient=PatientMechanics(lung_model=LinearLung(0.05)),
             )
         )
-        venegas_peak = _peak_pressure(
+        venegas_peak = peak_pressure(
             VentilationSimulation(
                 settings=common,
                 patient=PatientMechanics(lung_model=VenegasLung()),
@@ -117,8 +110,7 @@ class SimulationIntegrationTests(unittest.TestCase):
                     ),
                 ),
             )
-            for _ in range(int(90.0 / 0.01)):
-                sim.step(0.01)
+            run_for_seconds(sim, 90.0)
             return sim.modes["PRVC"].applied_pinsp_cm_h2o
 
         low_peep = converged_pinsp(5.0)
@@ -130,15 +122,12 @@ class SimulationIntegrationTests(unittest.TestCase):
             settings=VentilatorSettings(mode="VCV"),
             patient=PatientMechanics(lung_model=LinearLung(0.05)),
         )
-        for _ in range(int(5.0 / 0.01)):
-            sim.step(0.01)
+        run_for_seconds(sim, 5.0)
         sim.patient = replace(sim.patient, lung_model=VenegasLung())
-        for _ in range(int(10.0 / 0.01)):
-            sim.step(0.01)
+        run_for_seconds(sim, 10.0)
         sim.patient = replace(sim.patient, lung_model=VenegasHysteresisLung())
-        for _ in range(int(10.0 / 0.01)):
-            s = sim.step(0.01)
-        self.assertIsNotNone(s)
+        final = run_for_seconds(sim, 10.0)
+        self.assertTrue(final)
 
 
 if __name__ == "__main__":

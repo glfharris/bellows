@@ -130,8 +130,12 @@ bellows/
         waveform.py             terminal waveform renderer
 
 tests/
-    test_modes.py               directional tests for VCV / PCV / PRVC / APRV
-    test_lung_model.py          lung-model and PEEP-recruitment tests
+    helpers.py                  shared simulation test helpers
+    modes/
+        test_modes.py           directional tests for VCV / PCV / PRVC / APRV
+    simulation/
+        test_lung_model.py      lung-model and PEEP-recruitment tests
+        test_state.py           settings, reset, and patient preset contracts
 ```
 
 Design choices:
@@ -171,4 +175,3 @@ uv run python -m compileall bellows main.py tests
 ```
 
 Planned work, known limitations, and future-feature notes live in [TODO.md](TODO.md).
-
