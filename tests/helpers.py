@@ -8,6 +8,7 @@ each test file doesn't need to re-define the same loop and aggregation.
 from __future__ import annotations
 
 from bellows.simulation.engine import VentilationSimulation
+from bellows.simulation.runner import run_samples
 from bellows.simulation.state import SimulationSample
 
 
@@ -15,7 +16,7 @@ def run_for_seconds(
     sim: VentilationSimulation, seconds: float, dt_s: float = 0.01
 ) -> list[SimulationSample]:
     """Drive ``sim`` for ``seconds`` of simulated time and return every sample."""
-    return [sim.step(dt_s) for _ in range(int(seconds / dt_s))]
+    return run_samples(sim, seconds=seconds, dt_s=dt_s)
 
 
 def peak_pressure(

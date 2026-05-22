@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bellows.simulation.phase import PHASE_INSPIRATION
 from bellows.simulation.state import PatientMechanics, VentilatorSettings
 from bellows.ventilator.modes.base import (
     ModeStep,
@@ -34,7 +35,7 @@ class VolumeControl(VentilatorMode):
             floor=settings.peep_cm_h2o,
         )
         return ModeStep(
-            phase="inspiration",
+            phase=PHASE_INSPIRATION,
             flow_l_s=flow_l_s,
             pressure_cm_h2o=pressure_cm_h2o,
             lung_volume_l=next_volume_l,

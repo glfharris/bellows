@@ -23,35 +23,190 @@ from bellows.simulation.presets import (
     PatientPreset,
     presets_for,
 )
+from bellows.simulation.metrics import BreathMetricsTracker
 from bellows.simulation.state import (
     PatientMechanics,
     SimulationSample,
     VentilatorSettings,
 )
+from bellows.ventilator.registry import VENTILATOR_MODES
 from bellows.waveforms.buffers import TraceBuffer
 from bellows.ui.waveform import WaveformSpec, WaveformWidget
-
-
-MODES: tuple[str, ...] = ("VCV", "PCV", "PRVC", "APRV")
-
-
-@dataclass
-class BreathMetrics:
-    current_breath: int | None = None
-    current_min_volume_ml: float = 0.0
-    current_max_volume_ml: float = 0.0
-    current_peak_pressure_cm_h2o: float = 0.0
-    current_etco2_kpa: float = 0.0
-    completed_vt_ml: float | None = None
-    completed_minute_volume_l_min: float | None = None
-    completed_peak_pressure_cm_h2o: float | None = None
-    completed_etco2_kpa: float | None = None
 
 
 @dataclass(frozen=True)
 class ControlRow:
     key: str
     label: str
+
+
+@dataclass(frozen=True)
+class ControlAction:
+    method_name: str
+    args: tuple[object, ...] = ()
+
+
+@dataclass(frozen=True)
+class ControlDefinition:
+    key: str
+    label: str
+    decrease: ControlAction | None = None
+    increase: ControlAction | None = None
+    activate: ControlAction | None = None
+    adjust_message: str | None = None
+
+    def row(self) -> ControlRow:
+        return ControlRow(self.key, self.label)
+
+
+def _action(method_name: str, *args: object) -> ControlAction:
+    return ControlAction(method_name, args)
+
+
+CONTROL_DEFINITIONS: dict[str, ControlDefinition] = {
+    "mode": ControlDefinition(
+        "mode",
+        "Mode",
+        activate=_action("_open_mode_picker"),
+        adjust_message="Mode: press enter to choose",
+    ),
+    "target": ControlDefinition(
+        "target",
+        "Target",
+        decrease=_action("action_target_down"),
+        increase=_action("action_target_up"),
+    ),
+    "rr": ControlDefinition(
+        "rr",
+        "RR",
+        decrease=_action("action_rr_down"),
+        increase=_action("action_rr_up"),
+    ),
+    "peep": ControlDefinition(
+        "peep",
+        "PEEP",
+        decrease=_action("action_peep_down"),
+        increase=_action("action_peep_up"),
+    ),
+    "ie": ControlDefinition(
+        "ie",
+        "I:E",
+        decrease=_action("action_ie_shorter"),
+        increase=_action("action_ie_longer"),
+    ),
+    "p_high": ControlDefinition(
+        "p_high",
+        "P_high",
+        decrease=_action("action_p_high_down"),
+        increase=_action("action_p_high_up"),
+    ),
+    "p_low": ControlDefinition(
+        "p_low",
+        "P_low",
+        decrease=_action("action_p_low_down"),
+        increase=_action("action_p_low_up"),
+    ),
+    "t_high": ControlDefinition(
+        "t_high",
+        "T_high",
+        decrease=_action("action_t_high_down"),
+        increase=_action("action_t_high_up"),
+    ),
+    "t_low": ControlDefinition(
+        "t_low",
+        "T_low",
+        decrease=_action("action_t_low_down"),
+        increase=_action("action_t_low_up"),
+    ),
+    "lung_model": ControlDefinition(
+        "lung_model",
+        "Lung model",
+        activate=_action("_open_lung_model_picker"),
+        adjust_message="Lung model: press enter to choose",
+    ),
+    "preset": ControlDefinition(
+        "preset",
+        "Preset",
+        activate=_action("_open_patient_preset_picker"),
+        adjust_message="Preset: press enter to choose",
+    ),
+    "compliance": ControlDefinition(
+        "compliance",
+        "Compliance",
+        decrease=_action("action_compliance_down"),
+        increase=_action("action_compliance_up"),
+    ),
+    "inflection": ControlDefinition(
+        "inflection",
+        "Inflection",
+        decrease=_action("action_inflection_down"),
+        increase=_action("action_inflection_up"),
+    ),
+    "slope": ControlDefinition(
+        "slope",
+        "Slope",
+        decrease=_action("action_slope_down"),
+        increase=_action("action_slope_up"),
+    ),
+    "recruitable": ControlDefinition(
+        "recruitable",
+        "Recruitable",
+        decrease=_action("action_recruitable_down"),
+        increase=_action("action_recruitable_up"),
+    ),
+    "hysteresis": ControlDefinition(
+        "hysteresis",
+        "Hysteresis",
+        decrease=_action("action_hysteresis_down"),
+        increase=_action("action_hysteresis_up"),
+    ),
+    "resistance": ControlDefinition(
+        "resistance",
+        "Resistance",
+        decrease=_action("action_resistance_down"),
+        increase=_action("action_resistance_up"),
+    ),
+    "autoscale": ControlDefinition(
+        "autoscale",
+        "Fit scales",
+        decrease=_action("_fit_waveform_scales"),
+        increase=_action("_fit_waveform_scales"),
+        activate=_action("_fit_waveform_scales"),
+    ),
+    "pressure": ControlDefinition(
+        "pressure",
+        "Pressure",
+        decrease=_action("_toggle_waveform", "pressure"),
+        increase=_action("_toggle_waveform", "pressure"),
+        activate=_action("_toggle_waveform", "pressure"),
+    ),
+    "flow": ControlDefinition(
+        "flow",
+        "Flow",
+        decrease=_action("_toggle_waveform", "flow"),
+        increase=_action("_toggle_waveform", "flow"),
+        activate=_action("_toggle_waveform", "flow"),
+    ),
+    "volume": ControlDefinition(
+        "volume",
+        "Volume",
+        decrease=_action("_toggle_waveform", "volume"),
+        increase=_action("_toggle_waveform", "volume"),
+        activate=_action("_toggle_waveform", "volume"),
+    ),
+    "co2": ControlDefinition(
+        "co2",
+        "CO2 trace",
+        decrease=_action("_toggle_waveform", "co2"),
+        increase=_action("_toggle_waveform", "co2"),
+        activate=_action("_toggle_waveform", "co2"),
+    ),
+}
+
+CONVENTIONAL_SETTING_CONTROLS = ("target", "rr", "peep", "ie")
+APRV_SETTING_CONTROLS = ("p_high", "p_low", "t_high", "t_low")
+VENEGAS_PATIENT_CONTROLS = ("inflection", "slope", "recruitable")
+WAVEFORM_CONTROLS = ("autoscale", "pressure", "flow", "volume", "co2")
 
 
 class ChoiceModal(ModalScreen[str | None]):
@@ -237,11 +392,15 @@ class BellowsApp(App[None]):
         ("q", "quit", "Quit"),
     ]
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        simulation: VentilationSimulation | None = None,
+        patient_preset_name: str | None = None,
+    ) -> None:
         super().__init__()
         self.title = "bellows"
         self.sub_title = "ventilation education simulator"
-        self.simulation = VentilationSimulation()
+        self.simulation = simulation or VentilationSimulation()
         self.paused = False
         self.visible_window_s = 12.0
         self.dt_s = 0.01
@@ -267,11 +426,13 @@ class BellowsApp(App[None]):
         self.control_rows: list[ControlRow] = []
         self._rebuild_control_rows()
         self.selected_control_index = 0
-        self.patient_preset_index = 0
-        self.patient_preset_name = presets_for(
-            self.simulation.patient.lung_model.name
-        )[self.patient_preset_index].name
-        self.metrics = BreathMetrics()
+        self.patient_preset_name = (
+            patient_preset_name or self._matching_patient_preset_name()
+        )
+        self.patient_preset_index = self._patient_preset_index(
+            self.patient_preset_name
+        )
+        self.metrics = BreathMetricsTracker(minimum_duration_s=self.dt_s)
         self.message = "Ready"
 
     def compose(self) -> ComposeResult:
@@ -354,33 +515,33 @@ class BellowsApp(App[None]):
 
     def action_activate_selected_control(self) -> None:
         key = self._selected_control_key()
-        if key == "mode":
-            self._open_mode_picker()
-        elif key == "lung_model":
-            self._open_lung_model_picker()
-        elif key == "preset":
-            self._open_patient_preset_picker()
-        elif key == "autoscale":
-            self._fit_waveform_scales()
-        elif key in self.waveform_visible:
-            self._toggle_waveform(key)
-        else:
-            self.message = f"{self.control_rows[self.selected_control_index].label}: use left/right"
-            self._refresh_static_panels()
+        definition = CONTROL_DEFINITIONS[key]
+        if definition.activate is not None:
+            self._run_control_action(definition.activate)
+            return
+
+        self.message = f"{definition.label}: use left/right"
+        self._refresh_static_panels()
 
     def action_reset(self) -> None:
         self.simulation.reset()
         for buffer in self.buffers.values():
             buffer.clear()
-        self.metrics = BreathMetrics()
+        self.metrics = BreathMetricsTracker(minimum_duration_s=self.dt_s)
         self.message = "Simulation reset"
         self._refresh_waveforms()
         self._refresh_static_panels()
 
     def action_toggle_mode(self) -> None:
         settings = self._editable_settings()
-        current = settings.mode if settings.mode in MODES else MODES[0]
-        next_mode = MODES[(MODES.index(current) + 1) % len(MODES)]
+        current = (
+            settings.mode
+            if settings.mode in VENTILATOR_MODES
+            else VENTILATOR_MODES[0]
+        )
+        next_mode = VENTILATOR_MODES[
+            (VENTILATOR_MODES.index(current) + 1) % len(VENTILATOR_MODES)
+        ]
         self._set_settings(replace(settings, mode=next_mode), f"Mode {next_mode}")
 
     def action_toggle_co2(self) -> None:
@@ -610,87 +771,18 @@ class BellowsApp(App[None]):
 
     def _adjust_selected_control(self, direction: int) -> None:
         key = self._selected_control_key()
-        if key == "target":
-            if direction < 0:
-                self.action_target_down()
-            else:
-                self.action_target_up()
-        elif key == "rr":
-            if direction < 0:
-                self.action_rr_down()
-            else:
-                self.action_rr_up()
-        elif key == "peep":
-            if direction < 0:
-                self.action_peep_down()
-            else:
-                self.action_peep_up()
-        elif key == "ie":
-            if direction < 0:
-                self.action_ie_shorter()
-            else:
-                self.action_ie_longer()
-        elif key == "p_high":
-            if direction < 0:
-                self.action_p_high_down()
-            else:
-                self.action_p_high_up()
-        elif key == "p_low":
-            if direction < 0:
-                self.action_p_low_down()
-            else:
-                self.action_p_low_up()
-        elif key == "t_high":
-            if direction < 0:
-                self.action_t_high_down()
-            else:
-                self.action_t_high_up()
-        elif key == "t_low":
-            if direction < 0:
-                self.action_t_low_down()
-            else:
-                self.action_t_low_up()
-        elif key == "compliance":
-            if direction < 0:
-                self.action_compliance_down()
-            else:
-                self.action_compliance_up()
-        elif key == "inflection":
-            if direction < 0:
-                self.action_inflection_down()
-            else:
-                self.action_inflection_up()
-        elif key == "slope":
-            if direction < 0:
-                self.action_slope_down()
-            else:
-                self.action_slope_up()
-        elif key == "recruitable":
-            if direction < 0:
-                self.action_recruitable_down()
-            else:
-                self.action_recruitable_up()
-        elif key == "hysteresis":
-            if direction < 0:
-                self.action_hysteresis_down()
-            else:
-                self.action_hysteresis_up()
-        elif key == "resistance":
-            if direction < 0:
-                self.action_resistance_down()
-            else:
-                self.action_resistance_up()
-        elif key == "preset":
-            self.message = "Preset: press enter to choose"
-            self._refresh_static_panels()
-        elif key == "autoscale":
-            self._fit_waveform_scales()
-        elif key in ("mode", "lung_model"):
-            label = "Mode" if key == "mode" else "Lung model"
-            self.message = f"{label}: press enter to choose"
-            self._refresh_static_panels()
-        elif key in self.waveform_visible:
-            self._toggle_waveform(key)
+        definition = CONTROL_DEFINITIONS[key]
+        action = definition.decrease if direction < 0 else definition.increase
+        if action is not None:
+            self._run_control_action(action)
+            return
+
+        self.message = definition.adjust_message or f"{definition.label}: use enter"
+        self._refresh_static_panels()
+
+    def _run_control_action(self, action: ControlAction) -> None:
+        method = getattr(self, action.method_name)
+        method(*action.args)
 
     def _selected_control_key(self) -> str:
         return self.control_rows[self.selected_control_index].key
@@ -715,51 +807,22 @@ class BellowsApp(App[None]):
         mode = settings.mode
         lung_model_name = self.simulation.patient.lung_model.name
 
-        rows: list[ControlRow] = [ControlRow("mode", "Mode")]
+        rows: list[ControlRow] = [CONTROL_DEFINITIONS["mode"].row()]
         if mode == "APRV":
-            rows.extend(
-                [
-                    ControlRow("p_high", "P_high"),
-                    ControlRow("p_low", "P_low"),
-                    ControlRow("t_high", "T_high"),
-                    ControlRow("t_low", "T_low"),
-                ]
-            )
+            rows.extend(self._control_rows_for(APRV_SETTING_CONTROLS))
         else:
-            rows.extend(
-                [
-                    ControlRow("target", "Target"),
-                    ControlRow("rr", "RR"),
-                    ControlRow("peep", "PEEP"),
-                    ControlRow("ie", "I:E"),
-                ]
-            )
+            rows.extend(self._control_rows_for(CONVENTIONAL_SETTING_CONTROLS))
 
-        rows.append(ControlRow("lung_model", "Lung model"))
-        rows.append(ControlRow("preset", "Preset"))
+        rows.extend(self._control_rows_for(("lung_model", "preset")))
         if lung_model_name == "Linear":
-            rows.append(ControlRow("compliance", "Compliance"))
+            rows.append(CONTROL_DEFINITIONS["compliance"].row())
         else:
-            rows.extend(
-                [
-                    ControlRow("inflection", "Inflection"),
-                    ControlRow("slope", "Slope"),
-                    ControlRow("recruitable", "Recruitable"),
-                ]
-            )
+            rows.extend(self._control_rows_for(VENEGAS_PATIENT_CONTROLS))
             if lung_model_name == "Venegas+H":
-                rows.append(ControlRow("hysteresis", "Hysteresis"))
-        rows.append(ControlRow("resistance", "Resistance"))
+                rows.append(CONTROL_DEFINITIONS["hysteresis"].row())
+        rows.append(CONTROL_DEFINITIONS["resistance"].row())
 
-        rows.extend(
-            [
-                ControlRow("autoscale", "Fit scales"),
-                ControlRow("pressure", "Pressure"),
-                ControlRow("flow", "Flow"),
-                ControlRow("volume", "Volume"),
-                ControlRow("co2", "CO2 trace"),
-            ]
-        )
+        rows.extend(self._control_rows_for(WAVEFORM_CONTROLS))
         self.control_rows = rows
 
         for index, row in enumerate(rows):
@@ -767,6 +830,9 @@ class BellowsApp(App[None]):
                 self.selected_control_index = index
                 return
         self.selected_control_index = 0
+
+    def _control_rows_for(self, keys: tuple[str, ...]) -> list[ControlRow]:
+        return [CONTROL_DEFINITIONS[key].row() for key in keys]
 
     def _toggle_waveform(self, waveform: str) -> None:
         visible = not self.waveform_visible[waveform]
@@ -797,7 +863,7 @@ class BellowsApp(App[None]):
 
     def _open_mode_picker(self) -> None:
         settings = self._editable_settings()
-        choices = list(MODES)
+        choices = list(VENTILATOR_MODES)
         current_index = choices.index(settings.mode) if settings.mode in choices else 0
         self.push_screen(
             ChoiceModal("Ventilator mode", choices, current_index=current_index),
@@ -886,6 +952,19 @@ class BellowsApp(App[None]):
         self.message = f"Patient preset {preset.name}"
         self._refresh_static_panels()
 
+    def _matching_patient_preset_name(self) -> str:
+        for preset in presets_for(self.simulation.patient.lung_model.name):
+            if preset.mechanics == self.simulation.patient:
+                return preset.name
+        return "Custom"
+
+    def _patient_preset_index(self, preset_name: str) -> int:
+        presets = presets_for(self.simulation.patient.lung_model.name)
+        for index, preset in enumerate(presets):
+            if preset.name == preset_name:
+                return index
+        return 0
+
     def _set_settings(self, settings: VentilatorSettings, message: str) -> None:
         previous_mode = self._editable_settings().mode
         self.simulation.queue_settings(settings)
@@ -927,47 +1006,7 @@ class BellowsApp(App[None]):
         self._refresh_static_panels()
 
     def _record_metrics(self, sample: SimulationSample) -> None:
-        if self.metrics.current_breath != sample.breath:
-            if self.metrics.current_breath is not None:
-                self._finalize_current_breath()
-
-            self.metrics.current_breath = sample.breath
-            self.metrics.current_min_volume_ml = sample.volume_ml
-            self.metrics.current_max_volume_ml = sample.volume_ml
-            self.metrics.current_peak_pressure_cm_h2o = sample.pressure_cm_h2o
-            self.metrics.current_etco2_kpa = sample.co2_kpa
-            return
-
-        self.metrics.current_min_volume_ml = min(
-            self.metrics.current_min_volume_ml,
-            sample.volume_ml,
-        )
-        self.metrics.current_max_volume_ml = max(
-            self.metrics.current_max_volume_ml,
-            sample.volume_ml,
-        )
-        self.metrics.current_peak_pressure_cm_h2o = max(
-            self.metrics.current_peak_pressure_cm_h2o,
-            sample.pressure_cm_h2o,
-        )
-        self.metrics.current_etco2_kpa = max(
-            self.metrics.current_etco2_kpa,
-            sample.co2_kpa,
-        )
-
-    def _finalize_current_breath(self) -> None:
-        vt_ml = max(
-            0.0,
-            self.metrics.current_max_volume_ml - self.metrics.current_min_volume_ml,
-        )
-        settings = self.simulation.settings
-        actual_rr_bpm = 60.0 / max(settings.cycle_s, 0.01)
-        self.metrics.completed_vt_ml = vt_ml
-        self.metrics.completed_minute_volume_l_min = vt_ml * actual_rr_bpm / 1000.0
-        self.metrics.completed_peak_pressure_cm_h2o = (
-            self.metrics.current_peak_pressure_cm_h2o
-        )
-        self.metrics.completed_etco2_kpa = self.metrics.current_etco2_kpa
+        self.metrics.observe(sample)
 
     def _refresh_waveforms(self) -> None:
         earliest = self.simulation.time_s - self.visible_window_s

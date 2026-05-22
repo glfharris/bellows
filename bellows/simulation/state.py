@@ -28,6 +28,24 @@ class VentilatorSettings:
     t_high_s: float = 4.0
     t_low_s: float = 0.6
 
+    def __post_init__(self) -> None:
+        if self.rr_bpm <= 0.0:
+            raise ValueError("rr_bpm must be greater than zero")
+        if self.vt_ml < 0.0:
+            raise ValueError("vt_ml must be greater than or equal to zero")
+        if self.pinsp_cm_h2o < 0.0:
+            raise ValueError("pinsp_cm_h2o must be greater than or equal to zero")
+        if self.peep_cm_h2o < 0.0:
+            raise ValueError("peep_cm_h2o must be greater than or equal to zero")
+        if self.ie_i <= 0.0 or self.ie_e <= 0.0:
+            raise ValueError("ie_i and ie_e must be greater than zero")
+        if self.p_high_cm_h2o < 0.0 or self.p_low_cm_h2o < 0.0:
+            raise ValueError("APRV pressures must be greater than or equal to zero")
+        if self.p_high_cm_h2o <= self.p_low_cm_h2o:
+            raise ValueError("p_high_cm_h2o must be greater than p_low_cm_h2o")
+        if self.t_high_s <= 0.0 or self.t_low_s <= 0.0:
+            raise ValueError("t_high_s and t_low_s must be greater than zero")
+
     @property
     def cycle_s(self) -> float:
         if self.mode == "APRV":
@@ -65,6 +83,12 @@ class PatientMechanics:
     lung_model: LungModel = field(default_factory=lambda: LinearLung(0.05))
     resistance_cm_h2o_s_per_l: float = 10.0
     etco2_kpa: float = 5.1
+
+    def __post_init__(self) -> None:
+        if self.resistance_cm_h2o_s_per_l <= 0.0:
+            raise ValueError("resistance_cm_h2o_s_per_l must be greater than zero")
+        if self.etco2_kpa < 0.0:
+            raise ValueError("etco2_kpa must be greater than or equal to zero")
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,4 @@
-from bellows.app import main
+from bellows.cli import main
 
 
 if __name__ == "__main__":

@@ -48,6 +48,26 @@ class VentilatorSettingsTests(unittest.TestCase):
         self.assertAlmostEqual(settings.vt_l, 0.6)
         self.assertAlmostEqual(settings.inspiratory_flow_l_s, 0.3)
 
+    def test_rejects_non_physical_numeric_settings(self) -> None:
+        with self.assertRaisesRegex(ValueError, "rr_bpm"):
+            VentilatorSettings(rr_bpm=0.0)
+        with self.assertRaisesRegex(ValueError, "ie_i and ie_e"):
+            VentilatorSettings(ie_e=0.0)
+        with self.assertRaisesRegex(ValueError, "p_high_cm_h2o"):
+            VentilatorSettings(
+                mode="APRV",
+                p_high_cm_h2o=5.0,
+                p_low_cm_h2o=5.0,
+            )
+
+
+class PatientMechanicsTests(unittest.TestCase):
+    def test_rejects_non_physical_numeric_mechanics(self) -> None:
+        with self.assertRaisesRegex(ValueError, "resistance"):
+            PatientMechanics(resistance_cm_h2o_s_per_l=0.0)
+        with self.assertRaisesRegex(ValueError, "etco2"):
+            PatientMechanics(etco2_kpa=-1.0)
+
 
 class VentilationSimulationStateTests(unittest.TestCase):
     def test_reset_clears_time_pending_settings_and_returns_to_equilibrium(self) -> None:

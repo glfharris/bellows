@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-bellows = "bellows.app:main"
+bellows = "bellows.cli:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from bellows.simulation.lung_model import PHASE_EXPIRATION, PHASE_INSPIRATION
+from bellows.simulation.phase import PHASE_EXPIRATION, PHASE_INSPIRATION
 from bellows.simulation.state import PatientMechanics, VentilatorSettings
 
 
@@ -80,7 +80,11 @@ def passive_expiration(
     ``P_elastic(V_eq) = floor``.
     """
 
-    floor = settings.peep_cm_h2o if floor_pressure_cm_h2o is None else floor_pressure_cm_h2o
+    floor = (
+        settings.peep_cm_h2o
+        if floor_pressure_cm_h2o is None
+        else floor_pressure_cm_h2o
+    )
     elastic_cm_h2o = patient.lung_model.elastic_pressure(
         lung_volume_l, PHASE_EXPIRATION
     )
@@ -93,9 +97,31 @@ def passive_expiration(
         + flow_l_s * patient.resistance_cm_h2o_s_per_l,
     )
     return ModeStep(
-        phase="expiration",
+        phase=PHASE_EXPIRATION,
         flow_l_s=flow_l_s,
         pressure_cm_h2o=pressure_cm_h2o,
+        lung_volume_l=next_volume_l,
+    )
+
+
+def pressure_target_phase(
+    patient: PatientMechanics,
+    *,
+    target_pressure_cm_h2o: float,
+    phase: str,
+    lung_volume_l: float,
+    dt_s: float,
+) -> ModeStep:
+    elastic_cm_h2o = patient.lung_model.elastic_pressure(lung_volume_l, phase)
+    # Allow negative flow so the lung can deflate toward the pressure target
+    # if it starts the phase above that target.
+    driving_pressure = target_pressure_cm_h2o - elastic_cm_h2o
+    flow_l_s = driving_pressure / max(patient.resistance_cm_h2o_s_per_l, 1e-3)
+    next_volume_l = max(0.0, lung_volume_l + flow_l_s * dt_s)
+    return ModeStep(
+        phase=phase,
+        flow_l_s=flow_l_s,
+        pressure_cm_h2o=target_pressure_cm_h2o,
         lung_volume_l=next_volume_l,
     )
 

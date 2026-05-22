@@ -4,26 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from bellows.simulation.lung_model import PHASE_EXPIRATION
+from bellows.simulation.phase import PHASE_EXPIRATION
 from bellows.simulation.state import (
     PatientMechanics,
     SimulationSample,
     VentilatorSettings,
 )
-from bellows.ventilator.modes.aprv import AirwayPressureReleaseVentilation
 from bellows.ventilator.modes.base import LastBreathStats, VentilatorMode
-from bellows.ventilator.modes.pcv import PressureControl
-from bellows.ventilator.modes.prvc import PressureRegulatedVolumeControl
-from bellows.ventilator.modes.vcv import VolumeControl
-
-
-def _default_modes() -> dict[str, VentilatorMode]:
-    return {
-        "VCV": VolumeControl(),
-        "PCV": PressureControl(),
-        "PRVC": PressureRegulatedVolumeControl(),
-        "APRV": AirwayPressureReleaseVentilation(),
-    }
+from bellows.ventilator.registry import default_modes
 
 
 @dataclass
@@ -37,7 +25,7 @@ class VentilationSimulation:
     breath_time_s: float = 0.0
     lung_volume_l: float = field(default=0.0, init=False)
     breath: int = 0
-    modes: dict[str, VentilatorMode] = field(default_factory=_default_modes)
+    modes: dict[str, VentilatorMode] = field(default_factory=default_modes)
     _active_mode_name: str | None = field(default=None, init=False)
     _breath_has_samples: bool = field(default=False, init=False)
     _breath_max_volume_l: float = field(default=0.0, init=False)

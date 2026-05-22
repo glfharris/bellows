@@ -7,7 +7,7 @@ breaths so the delivered tidal volume tracks ``settings.vt_ml``.
 
 from __future__ import annotations
 
-from bellows.simulation.lung_model import PHASE_INSPIRATION
+from bellows.simulation.phase import PHASE_INSPIRATION
 from bellows.simulation.state import PatientMechanics, VentilatorSettings
 from bellows.ventilator.modes.base import (
     LastBreathStats,

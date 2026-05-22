@@ -20,6 +20,13 @@ uv run bellows
 
 Python 3.13+ via `uv`. Dependencies (Textual) are pulled in automatically.
 
+Startup options can seed the interactive simulator:
+
+```bash
+uv run bellows --mode PRVC --vt 450 --rr 16 --peep 8
+uv run bellows tui --mode APRV --p-high 26 --p-low 5 --t-high 4 --t-low 0.6
+```
+
 ---
 
 ## Controls

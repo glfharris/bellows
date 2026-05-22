@@ -26,9 +26,7 @@ import math
 from dataclasses import dataclass
 from typing import Protocol
 
-
-PHASE_INSPIRATION = "inspiration"
-PHASE_EXPIRATION = "expiration"
+from bellows.simulation.phase import PHASE_EXPIRATION, PHASE_INSPIRATION
 
 
 class LungModel(Protocol):
@@ -60,6 +58,10 @@ class LinearLung:
     compliance_l_per_cm_h2o: float = 0.05
     name: str = "Linear"
 
+    def __post_init__(self) -> None:
+        if self.compliance_l_per_cm_h2o <= 0.0:
+            raise ValueError("compliance_l_per_cm_h2o must be greater than zero")
+
     def elastic_pressure(self, volume_l: float, phase: str) -> float:
         return volume_l / self.compliance_l_per_cm_h2o
 
@@ -90,6 +92,13 @@ class VenegasLung:
     recruitable_volume_l: float = 1.2
     residual_volume_l: float = 0.0
     name: str = "Venegas"
+
+    def __post_init__(self) -> None:
+        _validate_venegas_parameters(
+            slope_width_cm_h2o=self.slope_width_cm_h2o,
+            recruitable_volume_l=self.recruitable_volume_l,
+            residual_volume_l=self.residual_volume_l,
+        )
 
     def elastic_pressure(self, volume_l: float, phase: str) -> float:
         return _venegas_pressure(
@@ -134,6 +143,17 @@ class VenegasHysteresisLung:
     residual_volume_l: float = 0.0
     hysteresis_offset_cm_h2o: float = 3.0
     name: str = "Venegas+H"
+
+    def __post_init__(self) -> None:
+        _validate_venegas_parameters(
+            slope_width_cm_h2o=self.slope_width_cm_h2o,
+            recruitable_volume_l=self.recruitable_volume_l,
+            residual_volume_l=self.residual_volume_l,
+        )
+        if self.hysteresis_offset_cm_h2o < 0.0:
+            raise ValueError(
+                "hysteresis_offset_cm_h2o must be greater than or equal to zero"
+            )
 
     def _shift(self, phase: str) -> float:
         half = self.hysteresis_offset_cm_h2o / 2.0
@@ -180,6 +200,20 @@ def _venegas_pressure(
     frac = (volume_l - a_l) / b_l
     frac = max(1e-4, min(1.0 - 1e-4, frac))
     return c_cm_h2o - d_cm_h2o * math.log(1.0 / frac - 1.0)
+
+
+def _validate_venegas_parameters(
+    *,
+    slope_width_cm_h2o: float,
+    recruitable_volume_l: float,
+    residual_volume_l: float,
+) -> None:
+    if slope_width_cm_h2o <= 0.0:
+        raise ValueError("slope_width_cm_h2o must be greater than zero")
+    if recruitable_volume_l <= 0.0:
+        raise ValueError("recruitable_volume_l must be greater than zero")
+    if residual_volume_l < 0.0:
+        raise ValueError("residual_volume_l must be greater than or equal to zero")
 
 
 def _venegas_slope(

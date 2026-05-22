@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from bellows.simulation.lung_model import PHASE_INSPIRATION
+from bellows.simulation.phase import PHASE_INSPIRATION
 from bellows.simulation.state import PatientMechanics, VentilatorSettings
-from bellows.ventilator.modes.base import ModeStep, VentilatorMode, passive_expiration
+from bellows.ventilator.modes.base import (
+    ModeStep,
+    VentilatorMode,
+    passive_expiration,
+    pressure_target_phase,
+)
 
 
 class PressureControl(VentilatorMode):
@@ -44,19 +49,10 @@ def _pcv_inspiration(
     """
 
     target_total_pressure = settings.peep_cm_h2o + pinsp_cm_h2o
-    elastic_cm_h2o = patient.lung_model.elastic_pressure(
-        lung_volume_l, PHASE_INSPIRATION
-    )
-    # Driving pressure may be negative if the lung is over-distended at the
-    # start of inspiration; real PCV exhalation valves let it deflate toward
-    # target. The ventilator still holds airway pressure at target.
-    driving_pressure = target_total_pressure - elastic_cm_h2o
-    flow_l_s = driving_pressure / max(patient.resistance_cm_h2o_s_per_l, 1e-3)
-    next_volume_l = max(0.0, lung_volume_l + flow_l_s * dt_s)
-
-    return ModeStep(
-        phase="inspiration",
-        flow_l_s=flow_l_s,
-        pressure_cm_h2o=target_total_pressure,
-        lung_volume_l=next_volume_l,
+    return pressure_target_phase(
+        patient,
+        target_pressure_cm_h2o=target_total_pressure,
+        phase=PHASE_INSPIRATION,
+        lung_volume_l=lung_volume_l,
+        dt_s=dt_s,
     )

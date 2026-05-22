@@ -6,9 +6,8 @@ import unittest
 from dataclasses import replace
 
 from bellows.simulation.engine import VentilationSimulation
+from bellows.simulation.phase import PHASE_EXPIRATION, PHASE_INSPIRATION
 from bellows.simulation.lung_model import (
-    PHASE_EXPIRATION,
-    PHASE_INSPIRATION,
     LinearLung,
     VenegasHysteresisLung,
     VenegasLung,
@@ -23,6 +22,10 @@ class LinearLungTests(unittest.TestCase):
         self.assertAlmostEqual(lung.elastic_pressure(0.0, PHASE_INSPIRATION), 0.0)
         self.assertAlmostEqual(lung.elastic_pressure(0.5, PHASE_INSPIRATION), 10.0)
         self.assertAlmostEqual(lung.elastic_slope(0.5, PHASE_INSPIRATION), 20.0)
+
+    def test_rejects_non_positive_compliance(self) -> None:
+        with self.assertRaisesRegex(ValueError, "compliance"):
+            LinearLung(compliance_l_per_cm_h2o=0.0)
 
 
 class VenegasLungTests(unittest.TestCase):
@@ -55,6 +58,14 @@ class VenegasLungTests(unittest.TestCase):
         self.assertLess(slope_mid, slope_low)
         self.assertLess(slope_mid, slope_high)
 
+    def test_rejects_non_physical_shape_parameters(self) -> None:
+        with self.assertRaisesRegex(ValueError, "slope_width"):
+            VenegasLung(slope_width_cm_h2o=0.0)
+        with self.assertRaisesRegex(ValueError, "recruitable_volume"):
+            VenegasLung(recruitable_volume_l=0.0)
+        with self.assertRaisesRegex(ValueError, "residual_volume"):
+            VenegasLung(residual_volume_l=-0.1)
+
 
 class VenegasHysteresisTests(unittest.TestCase):
     def test_inspiratory_pressure_higher_than_expiratory(self) -> None:
@@ -71,6 +82,10 @@ class VenegasHysteresisTests(unittest.TestCase):
             0.5, PHASE_EXPIRATION
         )
         self.assertAlmostEqual(diff, 4.0, places=3)
+
+    def test_rejects_negative_hysteresis_offset(self) -> None:
+        with self.assertRaisesRegex(ValueError, "hysteresis_offset"):
+            VenegasHysteresisLung(hysteresis_offset_cm_h2o=-1.0)
 
 
 class SimulationIntegrationTests(unittest.TestCase):
