@@ -1032,6 +1032,7 @@ class BellowsApp(App[None]):
                 self.buffers["co2"].append(sample.time_s, sample.co2_kpa)
 
         if settings_applied:
+            self._rebuild_control_rows()
             self.message = "Ventilator settings applied"
 
         self._refresh_waveforms()

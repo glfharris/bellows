@@ -17,6 +17,14 @@ def _select_control(app: BellowsApp, key: str) -> None:
     raise AssertionError(f"control row {key!r} not found")
 
 
+def _advance_until_pending_settings_apply(app: BellowsApp) -> None:
+    for _ in range(500):
+        if app.simulation.pending_settings is None:
+            return
+        app._tick()
+    raise AssertionError("pending settings were not applied")
+
+
 class AppControlTests(unittest.TestCase):
     def test_control_catalog_actions_resolve_to_app_methods(self) -> None:
         app = BellowsApp()
@@ -101,6 +109,18 @@ class AppControlTests(unittest.TestCase):
         self.assertEqual(app.simulation.pending_settings.mode, "APRV")
         self.assertEqual(app.simulation.pending_settings.vt_ml, 500.0)
         self.assertEqual(app.message, "Mode change pending; wait for next breath")
+
+    def test_aprv_rows_are_selectable_after_pending_mode_applies(self) -> None:
+        app = BellowsApp()
+        app._set_settings(replace(app.simulation.settings, mode="APRV"), "Mode APRV")
+
+        _advance_until_pending_settings_apply(app)
+        app.action_select_next_control()
+
+        self.assertEqual(app.simulation.settings.mode, "APRV")
+        self.assertIn("p_high", [row.key for row in app.control_rows])
+        self.assertNotIn("target", [row.key for row in app.control_rows])
+        self.assertEqual(app._selected_control_key(), "p_high")
 
     def test_mode_specific_target_label_is_used_for_rows(self) -> None:
         app = BellowsApp()
