@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -25,8 +25,10 @@ from bellows.simulation.presets import (
     PatientPreset,
     presets_for,
 )
+from bellows.simulation.recording import SimulationRecorder, SimulationRun
 from bellows.simulation.state import (
     PatientMechanics,
+    SimulationSample,
     VentilatorSettings,
 )
 from bellows.ventilator.modes.base import VentilatorMode
@@ -208,13 +210,6 @@ CONTROL_DEFINITIONS: dict[str, ControlDefinition] = {
         increase=_action("_toggle_waveform", "volume"),
         activate=_action("_toggle_waveform", "volume"),
     ),
-    "pv_loop": ControlDefinition(
-        "pv_loop",
-        "PV loop",
-        decrease=_action("_toggle_waveform", "pv_loop"),
-        increase=_action("_toggle_waveform", "pv_loop"),
-        activate=_action("_toggle_waveform", "pv_loop"),
-    ),
     "co2": ControlDefinition(
         "co2",
         "CO2 trace",
@@ -225,7 +220,7 @@ CONTROL_DEFINITIONS: dict[str, ControlDefinition] = {
 }
 
 VENEGAS_PATIENT_CONTROLS = ("inflection", "slope", "recruitable")
-WAVEFORM_CONTROLS = ("autoscale", "pressure", "flow", "volume", "pv_loop", "co2")
+WAVEFORM_CONTROLS = ("autoscale", "pressure", "flow", "volume", "co2")
 
 
 class ChoiceModal(ModalScreen[str | None]):
@@ -342,6 +337,15 @@ class BellowsApp(App[None]):
         padding: 1;
     }
 
+    #loop-panel {
+        width: 38;
+        min-width: 30;
+        height: 1fr;
+        background: #0d1412;
+        border-left: solid #26332f;
+        padding: 1;
+    }
+
     #status {
         height: 2;
         background: #101916;
@@ -392,6 +396,7 @@ class BellowsApp(App[None]):
         Binding("enter", "activate_selected_control", "Toggle", show=False),
         Binding("m", "toggle_mode", "Mode", show=False),
         Binding("c", "toggle_co2", "CO2", show=False),
+        Binding("p", "toggle_pv_loop", "PV loop", show=False),
         Binding("-", "target_down", "Target-", show=False),
         Binding("minus", "target_down", "Target-", show=False),
         Binding("=", "target_up", "Target+", show=False),
@@ -431,6 +436,10 @@ class BellowsApp(App[None]):
             "co2": TraceBuffer(2400),
         }
         self.loop_points: deque[LoopPoint] = deque(maxlen=2400)
+        self.recorder = SimulationRecorder(maxlen=2400)
+        initial_sample = self.simulation.current_sample()
+        self.recorder.append(initial_sample)
+        self._append_sample_to_views(initial_sample)
         self.waveform_visible = {
             "pressure": True,
             "flow": True,
@@ -440,6 +449,7 @@ class BellowsApp(App[None]):
         }
         self.waveforms: dict[str, WaveformWidget] = {}
         self.pv_loop: LoopWidget | None = None
+        self.loop_panel: Vertical | None = None
         self.status: Static | None = None
         self.numerics: Static | None = None
         self.sidebar: Static | None = None
@@ -502,8 +512,11 @@ class BellowsApp(App[None]):
                 yield pressure
                 yield flow
                 yield volume
-                yield pv_loop
                 yield co2
+            with Vertical(id="loop-panel") as loop_panel:
+                self.loop_panel = loop_panel
+                loop_panel.display = self.waveform_visible["pv_loop"]
+                yield pv_loop
         yield Static(
             "EDUCATIONAL SIMULATOR ONLY - not for clinical care",
             id="disclaimer",
@@ -563,6 +576,10 @@ class BellowsApp(App[None]):
         for buffer in self.buffers.values():
             buffer.clear()
         self.loop_points.clear()
+        self.recorder.clear()
+        initial_sample = self.simulation.current_sample()
+        self.recorder.append(initial_sample)
+        self._append_sample_to_views(initial_sample)
         self.message = "Simulation reset"
         self._refresh_waveforms()
         self._refresh_static_panels()
@@ -581,6 +598,9 @@ class BellowsApp(App[None]):
 
     def action_toggle_co2(self) -> None:
         self._toggle_waveform("co2")
+
+    def action_toggle_pv_loop(self) -> None:
+        self._toggle_waveform("pv_loop")
 
     def action_target_down(self) -> None:
         if self._ventilator_setting_change_blocked():
@@ -968,7 +988,11 @@ class BellowsApp(App[None]):
 
     def _toggle_waveform(self, waveform: str) -> None:
         visible = not self.waveform_visible[waveform]
-        if not visible and self._visible_waveform_count() <= 1:
+        if (
+            waveform in self.waveforms
+            and not visible
+            and self._visible_waveform_count() <= 1
+        ):
             self.message = "At least one waveform must remain visible"
             self._refresh_static_panels()
             return
@@ -976,8 +1000,11 @@ class BellowsApp(App[None]):
         self.waveform_visible[waveform] = visible
         if waveform in self.waveforms:
             self.waveforms[waveform].display = visible
-        elif waveform == "pv_loop" and self.pv_loop is not None:
-            self.pv_loop.display = visible
+        elif waveform == "pv_loop":
+            if self.loop_panel is not None:
+                self.loop_panel.display = visible
+            if self.pv_loop is not None:
+                self.pv_loop.display = visible
         kind = "panel" if waveform == "pv_loop" else "waveform"
         self.message = (
             f"{self._waveform_label(waveform)} {kind} shown"
@@ -987,7 +1014,11 @@ class BellowsApp(App[None]):
         self._refresh_static_panels()
 
     def _visible_waveform_count(self) -> int:
-        return sum(1 for visible in self.waveform_visible.values() if visible)
+        return sum(
+            1
+            for name, visible in self.waveform_visible.items()
+            if name in self.waveforms and visible
+        )
 
     def _fit_waveform_scales(self) -> None:
         for widget in self.waveforms.values():
@@ -1079,7 +1110,11 @@ class BellowsApp(App[None]):
     def _apply_patient_preset(self, preset: PatientPreset) -> None:
         previous_model = self.simulation.patient.lung_model.name
         self.patient_preset_name = preset.name
-        self.simulation.patient = preset.mechanics
+        self.simulation.update_patient(
+            lung_model=preset.mechanics.lung_model,
+            resistance_cm_h2o_s_per_l=preset.mechanics.resistance_cm_h2o_s_per_l,
+            etco2_kpa=preset.mechanics.etco2_kpa,
+        )
         if preset.mechanics.lung_model.name != previous_model:
             self._rebuild_control_rows()
         self.message = f"Patient preset {preset.name}"
@@ -1093,7 +1128,7 @@ class BellowsApp(App[None]):
 
     def _set_settings(self, settings: VentilatorSettings, message: str) -> None:
         previous_mode = self._editable_settings().mode
-        self.simulation.queue_settings(settings)
+        self.simulation.update_settings(**self._settings_updates(settings))
         if settings.mode != previous_mode:
             self._rebuild_control_rows()
         self.message = f"{message} queued for next breath"
@@ -1101,40 +1136,62 @@ class BellowsApp(App[None]):
 
     def _set_patient(self, patient: PatientMechanics, message: str) -> None:
         previous_model = self.simulation.patient.lung_model.name
-        self.simulation.patient = patient
+        patient = self.simulation.update_patient(**self._patient_updates(patient))
         self.patient_preset_name = "Custom"
         if patient.lung_model.name != previous_model:
             self._rebuild_control_rows()
         self.message = message
         self._refresh_static_panels()
 
+    def _settings_updates(self, settings: VentilatorSettings) -> dict[str, object]:
+        editable = self._editable_settings()
+        return {
+            field.name: getattr(settings, field.name)
+            for field in fields(VentilatorSettings)
+            if getattr(settings, field.name) != getattr(editable, field.name)
+        }
+
+    def _patient_updates(self, patient: PatientMechanics) -> dict[str, object]:
+        return {
+            field.name: getattr(patient, field.name)
+            for field in fields(PatientMechanics)
+            if getattr(patient, field.name)
+            != getattr(self.simulation.patient, field.name)
+        }
+
     def _editable_settings(self) -> VentilatorSettings:
         return self.simulation.pending_settings or self.simulation.settings
+
+    def recorded_run(self) -> SimulationRun:
+        return self.recorder.to_run(breath_summaries=self.simulation.breath_history)
+
+    def _append_sample_to_views(self, sample: SimulationSample) -> None:
+        self.buffers["pressure"].append(
+            sample.time_s,
+            sample.pressure_cm_h2o,
+        )
+        self.buffers["flow"].append(sample.time_s, sample.flow_l_min)
+        self.buffers["volume"].append(sample.time_s, sample.volume_ml)
+        self.buffers["co2"].append(sample.time_s, sample.co2_kpa)
+        self.loop_points.append(
+            LoopPoint(
+                breath=sample.breath,
+                x=sample.volume_ml,
+                y=sample.pressure_cm_h2o,
+                phase=sample.phase,
+            )
+        )
 
     def _tick(self) -> None:
         settings_applied = False
         if not self.paused:
             for _ in range(self.samples_per_render):
                 had_pending_settings = self.simulation.pending_settings is not None
-                samples = self.simulation.step_many(self.dt_s)
+                samples = self.recorder.record(self.simulation.step_many(self.dt_s))
                 if had_pending_settings and self.simulation.pending_settings is None:
                     settings_applied = True
                 for sample in samples:
-                    self.buffers["pressure"].append(
-                        sample.time_s,
-                        sample.pressure_cm_h2o,
-                    )
-                    self.buffers["flow"].append(sample.time_s, sample.flow_l_min)
-                    self.buffers["volume"].append(sample.time_s, sample.volume_ml)
-                    self.buffers["co2"].append(sample.time_s, sample.co2_kpa)
-                    self.loop_points.append(
-                        LoopPoint(
-                            breath=sample.breath,
-                            x=sample.volume_ml,
-                            y=sample.pressure_cm_h2o,
-                            phase=sample.phase,
-                        )
-                    )
+                    self._append_sample_to_views(sample)
 
         if settings_applied:
             self._rebuild_control_rows()
@@ -1279,11 +1336,6 @@ class BellowsApp(App[None]):
                         "volume",
                         "Volume",
                         self._visible_text("volume"),
-                    ),
-                    self._control_row(
-                        "pv_loop",
-                        "PV loop",
-                        self._visible_text("pv_loop"),
                     ),
                     self._control_row(
                         "co2",

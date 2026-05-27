@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bellows</title>
+    <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.31/dist/uPlot.min.css" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="ventilator">
+      <header class="status-strip">
+        <div class="brand">
+          <strong>bellows</strong>
+          <span>ventilation education simulator</span>
+        </div>
+        <div class="mode-status">
+          <span id="modeBadge">VCV</span>
+          <span id="clock">t=0.0s breath 000</span>
+        </div>
+        <div class="safety">Educational simulator only - not for clinical care</div>
+      </header>
+
+      <section class="screen">
+        <section class="waveform-bank" aria-label="Waveforms">
+          <div id="pressure" class="chart"></div>
+          <div id="flow" class="chart"></div>
+          <div id="volume" class="chart"></div>
+          <div id="co2" class="chart"></div>
+        </section>
+
+        <aside class="monitor-bank" aria-label="Monitor values">
+          <div class="numeric-grid">
+            <div class="numeric pressure">
+              <span class="numeric-label">Ppeak</span>
+              <strong id="ppeakValue">--</strong>
+              <span class="numeric-unit">cmH2O</span>
+            </div>
+            <div class="numeric volume">
+              <span class="numeric-label">VT</span>
+              <strong id="vteValue">--</strong>
+              <span class="numeric-unit">mL</span>
+            </div>
+            <div class="numeric flow">
+              <span class="numeric-label">MV</span>
+              <strong id="mvValue">--</strong>
+              <span class="numeric-unit">L/min</span>
+            </div>
+            <div class="numeric co2">
+              <span class="numeric-label">EtCO2</span>
+              <strong id="etco2Value">--</strong>
+              <span class="numeric-unit">kPa</span>
+            </div>
+          </div>
+
+          <div class="pv-card">
+            <div class="section-title">PV Loop</div>
+            <canvas id="pv"></canvas>
+          </div>
+
+          <div id="pending" class="pending">No pending changes</div>
+        </aside>
+      </section>
+
+      <footer class="settings-bar" aria-label="Ventilator settings">
+        <label class="setting-card">
+          <span class="setting-label">Mode</span>
+          <select id="mode">
+            <option>VCV</option>
+            <option>PCV</option>
+            <option>PRVC</option>
+            <option>APRV</option>
+          </select>
+        </label>
+        <label class="setting-card">
+          <span class="setting-label">VT</span>
+          <strong id="vtValue">-- mL</strong>
+          <input id="vt" type="range" min="100" max="1000" step="25" />
+        </label>
+        <label class="setting-card">
+          <span class="setting-label">Pinsp</span>
+          <strong id="pinspValue">-- cmH2O</strong>
+          <input id="pinsp" type="range" min="5" max="40" step="1" />
+        </label>
+        <label class="setting-card">
+          <span class="setting-label">RR</span>
+          <strong id="rrValue">--/min</strong>
+          <input id="rr" type="range" min="4" max="40" step="1" />
+        </label>
+        <label class="setting-card">
+          <span class="setting-label">PEEP</span>
+          <strong id="peepValue">-- cmH2O</strong>
+          <input id="peep" type="range" min="0" max="20" step="1" />
+        </label>
+        <label class="setting-card">
+          <span class="setting-label">Resistance</span>
+          <strong id="resistanceValue">--</strong>
+          <input id="resistance" type="range" min="3" max="40" step="1" />
+        </label>
+        <div class="transport-card">
+          <button id="pause">Pause</button>
+          <button id="reset">Reset</button>
+        </div>
+      </footer>
+    </main>
+
+    <script src="https://unpkg.com/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -12,7 +12,7 @@ from bellows.simulation.presets import LUNG_MODELS
 from bellows.ventilator.registry import VENTILATOR_MODES
 
 
-COMMANDS = ("tui",)
+COMMANDS = ("tui", "web")
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -38,6 +38,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
+    if args.command == "web":
+        from bellows.web.server import serve_web
+
+        serve_web(config, host=args.host, port=args.port)
+        return
+
     BellowsApp(
         simulation=config.build_simulation(),
         patient_preset_name=config.patient_preset_name,
@@ -55,6 +61,7 @@ def parse_args(
 
     raw_args = list(sys.argv[1:] if argv is None else argv)
     prog = "bellows"
+    command = "tui"
 
     if raw_args and raw_args[0] in COMMANDS:
         command = raw_args.pop(0)
@@ -65,9 +72,13 @@ def parse_args(
             f"unknown command {raw_args[0]!r}; choose one of {', '.join(COMMANDS)}"
         )
 
-    parser = _build_tui_parser(prog=prog)
+    parser = (
+        _build_web_parser(prog=prog)
+        if command == "web"
+        else _build_tui_parser(prog=prog)
+    )
     args = parser.parse_args(raw_args)
-    args.command = "tui"
+    args.command = command
     return args, parser
 
 
@@ -89,6 +100,26 @@ def _build_tui_parser(*, prog: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog,
         description="Run the interactive Bellows ventilator simulator.",
+    )
+    _add_startup_options(parser)
+    return parser
+
+
+def _build_web_parser(*, prog: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description="Run the local Bellows browser simulator.",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host interface for the local web server.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Port for the local web server.",
     )
     _add_startup_options(parser)
     return parser

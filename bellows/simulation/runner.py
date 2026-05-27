@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from bellows.simulation.engine import VentilationSimulation
+from bellows.simulation.recording import SimulationRecorder, SimulationRun
 from bellows.simulation.state import SimulationSample
 
 
@@ -41,14 +42,41 @@ def run_samples(
     dt_s: float = 0.01,
     seconds: float | None = None,
     breaths: int | None = None,
+    include_initial: bool = True,
 ) -> list[SimulationSample]:
     return list(
+        run_simulation(
+            simulation,
+            dt_s=dt_s,
+            seconds=seconds,
+            breaths=breaths,
+            include_initial=include_initial,
+        )
+    )
+
+
+def run_simulation(
+    simulation: VentilationSimulation,
+    *,
+    dt_s: float = 0.01,
+    seconds: float | None = None,
+    breaths: int | None = None,
+    include_initial: bool = True,
+) -> SimulationRun:
+    starting_history_len = len(simulation.breath_history)
+    recorder = SimulationRecorder()
+    if include_initial:
+        recorder.append(simulation.current_sample())
+    recorder.record(
         iter_samples(
             simulation,
             dt_s=dt_s,
             seconds=seconds,
             breaths=breaths,
         )
+    )
+    return recorder.to_run(
+        breath_summaries=list(simulation.breath_history)[starting_history_len:]
     )
 
 

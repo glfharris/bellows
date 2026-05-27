@@ -126,8 +126,7 @@ class WaveformWidget(Widget):
         canvas = [[False for _ in range(sub_width)] for _ in range(sub_height)]
         previous: tuple[int, int] | None = None
 
-        for point in self.points:
-            mapped = self._map_point(point, sub_width, sub_height)
+        for mapped in self._display_points(sub_width, sub_height):
             if previous is not None:
                 self._draw_line(canvas, previous, mapped)
             else:
@@ -136,6 +135,17 @@ class WaveformWidget(Widget):
             previous = mapped
 
         return self._braille_rows(canvas, width, height)
+
+    def _display_points(
+        self,
+        sub_width: int,
+        sub_height: int,
+    ) -> list[tuple[int, int]]:
+        by_x: dict[int, int] = {}
+        for point in self.points:
+            x, y = self._map_point(point, sub_width, sub_height)
+            by_x[x] = y
+        return sorted(by_x.items())
 
     def _map_point(
         self,

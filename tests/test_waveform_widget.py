@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from bellows.ui.waveform import WaveformSpec, WaveformWidget
+from bellows.waveforms.buffers import TracePoint
 
 
 class WaveformWidgetTests(unittest.TestCase):
@@ -28,6 +29,24 @@ class WaveformWidgetTests(unittest.TestCase):
         }
 
         self.assertEqual(widths, {WaveformWidget.SCALE_WIDTH})
+
+    def test_display_points_keep_one_value_per_terminal_subcolumn(self) -> None:
+        widget = WaveformWidget(
+            WaveformSpec("Flow", "L/min", "#57c7ff", -100.0, 100.0)
+        )
+        widget.update_points(
+            [
+                TracePoint(0.00, 80.0),
+                TracePoint(0.01, -80.0),
+                TracePoint(1.00, 0.0),
+            ],
+            window_start_s=0.0,
+            window_end_s=10.0,
+        )
+
+        display_points = widget._display_points(sub_width=20, sub_height=20)
+
+        self.assertEqual(display_points, [(0, 17), (2, 10)])
 
 
 if __name__ == "__main__":

@@ -40,6 +40,16 @@ class CliParsingTests(unittest.TestCase):
         self.assertEqual(args.peep, 8.0)
         self.assertEqual(args.lung_model, "Venegas")
 
+    def test_accepts_web_command(self) -> None:
+        args, _parser = parse_args(
+            ["web", "--host", "localhost", "--port", "8888", "--mode", "pcv"]
+        )
+
+        self.assertEqual(args.command, "web")
+        self.assertEqual(args.host, "localhost")
+        self.assertEqual(args.port, 8888)
+        self.assertEqual(args.mode, "PCV")
+
     def test_rejects_unknown_command(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):

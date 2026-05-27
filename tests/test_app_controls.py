@@ -177,13 +177,45 @@ class AppControlTests(unittest.TestCase):
 
         self.assertTrue(app.waveform_visible["co2"])
 
-    def test_pv_loop_activation_uses_catalog_action(self) -> None:
+    def test_pv_loop_is_toggled_by_keybinding_action(self) -> None:
         app = BellowsApp()
-        _select_control(app, "pv_loop")
 
-        app.action_activate_selected_control()
+        app.action_toggle_pv_loop()
 
         self.assertFalse(app.waveform_visible["pv_loop"])
+
+    def test_pv_loop_is_not_a_control_row(self) -> None:
+        app = BellowsApp()
+
+        self.assertNotIn("pv_loop", [row.key for row in app.control_rows])
+
+    def test_app_starts_with_initial_sample_in_traces(self) -> None:
+        app = BellowsApp()
+
+        initial = app.simulation.current_sample()
+
+        self.assertEqual(app.buffers["pressure"].points[0].time_s, 0.0)
+        self.assertEqual(
+            app.buffers["pressure"].points[0].value,
+            initial.pressure_cm_h2o,
+        )
+        self.assertEqual(app.loop_points[0].x, initial.volume_ml)
+        self.assertEqual(app.recorded_run()[0], initial)
+
+    def test_reset_restores_initial_sample_in_traces(self) -> None:
+        app = BellowsApp()
+        app._tick()
+
+        app.action_reset()
+
+        initial = app.simulation.current_sample()
+        self.assertEqual(len(app.recorded_run()), 1)
+        self.assertEqual(len(app.buffers["pressure"].points), 1)
+        self.assertEqual(app.buffers["pressure"].points[0].time_s, 0.0)
+        self.assertEqual(
+            app.buffers["pressure"].points[0].value,
+            initial.pressure_cm_h2o,
+        )
 
     def test_tick_collects_pressure_volume_loop_points(self) -> None:
         app = BellowsApp()
@@ -191,6 +223,7 @@ class AppControlTests(unittest.TestCase):
         app._tick()
 
         self.assertGreater(len(app.loop_points), 0)
+        self.assertGreater(len(app.recorded_run()), 0)
         point = app.loop_points[-1]
         self.assertEqual(point.breath, app.simulation.breath)
         self.assertGreaterEqual(point.x, 0.0)

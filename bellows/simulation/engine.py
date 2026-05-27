@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 from bellows.simulation.mechanics import apply_ventilator_intent
 from bellows.simulation.metrics import BreathAccumulator, BreathHistory, BreathSummary
-from bellows.simulation.phase import PHASE_EXPIRATION
+from bellows.simulation.phase import PHASE_EXPIRATION, PHASE_INSPIRATION
+from bellows.simulation.recording import SimulationRun
 from bellows.simulation.state import (
     PatientMechanics,
     SimulationSample,
@@ -74,6 +76,71 @@ class VentilationSimulation:
     def queue_settings(self, settings: VentilatorSettings) -> None:
         self.pending_settings = settings
 
+    def current_sample(self) -> SimulationSample:
+        """Return a sample representing the current simulation state."""
+
+        phase = (
+            PHASE_INSPIRATION
+            if self.breath_time_s < self.settings.inspiratory_time_s
+            else PHASE_EXPIRATION
+        )
+        return SimulationSample(
+            time_s=self.time_s,
+            pressure_cm_h2o=self.airway_pressure_cm_h2o,
+            flow_l_min=0.0,
+            volume_ml=self.lung_volume_l * 1000.0,
+            co2_kpa=self._co2(self.breath_time_s),
+            phase=phase,
+            breath=self.breath,
+        )
+
+    def update_settings(
+        self,
+        *,
+        queue: bool = True,
+        **updates: Any,
+    ) -> VentilatorSettings:
+        """Update ventilator settings, queued for the next breath by default."""
+
+        base_settings = (
+            self.pending_settings
+            if queue and self.pending_settings is not None
+            else self.settings
+        )
+        updated = replace(base_settings, **updates)
+        if queue:
+            self.queue_settings(updated)
+        else:
+            self.settings = updated
+            self.pending_settings = None
+        return updated
+
+    def update_patient(self, **updates: Any) -> PatientMechanics:
+        """Update patient mechanics immediately."""
+
+        self.patient = replace(self.patient, **updates)
+        return self.patient
+
+    def run(
+        self,
+        *,
+        dt_s: float = 0.01,
+        seconds: float | None = None,
+        breaths: int | None = None,
+        include_initial: bool = True,
+    ) -> SimulationRun:
+        """Run the simulation and return the generated samples."""
+
+        from bellows.simulation.runner import run_simulation
+
+        return run_simulation(
+            self,
+            dt_s=dt_s,
+            seconds=seconds,
+            breaths=breaths,
+            include_initial=include_initial,
+        )
+
     def step(self, dt_s: float) -> SimulationSample:
         return self.step_many(dt_s)[-1]
 
@@ -110,10 +177,12 @@ class VentilationSimulation:
         )
         self.lung_volume_l = step.lung_volume_l
         self.airway_pressure_cm_h2o = step.pressure_cm_h2o
-        co2_kpa = self._co2(phase_time_s)
+        sample_time_s = self.time_s + dt_s
+        sample_phase_time_s = phase_time_s + dt_s
+        co2_kpa = self._co2(sample_phase_time_s)
 
         sample = SimulationSample(
-            time_s=self.time_s,
+            time_s=sample_time_s,
             pressure_cm_h2o=step.pressure_cm_h2o,
             flow_l_min=step.flow_l_s * 60.0,
             volume_ml=self.lung_volume_l * 1000.0,

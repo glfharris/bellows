@@ -150,6 +150,39 @@ class VentilationSimulationStateTests(unittest.TestCase):
         stiff_peak = max(s.pressure_cm_h2o for s in run_for_seconds(sim, 5.0))
         self.assertGreater(stiff_peak, soft_peak)
 
+    def test_update_settings_queues_changes_by_default(self) -> None:
+        sim = VentilationSimulation(settings=VentilatorSettings(mode="VCV"))
+
+        updated = sim.update_settings(mode="PCV", pinsp_cm_h2o=18.0)
+
+        self.assertEqual(sim.settings.mode, "VCV")
+        self.assertIs(sim.pending_settings, updated)
+        self.assertEqual(updated.mode, "PCV")
+        self.assertEqual(updated.pinsp_cm_h2o, 18.0)
+
+    def test_update_settings_can_apply_immediately(self) -> None:
+        sim = VentilationSimulation(settings=VentilatorSettings(mode="VCV"))
+
+        updated = sim.update_settings(queue=False, mode="PCV")
+
+        self.assertIs(sim.settings, updated)
+        self.assertIsNone(sim.pending_settings)
+        self.assertEqual(sim.settings.mode, "PCV")
+
+    def test_update_patient_applies_immediately(self) -> None:
+        sim = VentilationSimulation(
+            patient=PatientMechanics(lung_model=LinearLung(0.05))
+        )
+
+        updated = sim.update_patient(
+            lung_model=LinearLung(0.025),
+            resistance_cm_h2o_s_per_l=20.0,
+        )
+
+        self.assertIs(sim.patient, updated)
+        self.assertEqual(sim.patient.lung_model.compliance_l_per_cm_h2o, 0.025)
+        self.assertEqual(sim.patient.resistance_cm_h2o_s_per_l, 20.0)
+
 
 class PatientPresetTests(unittest.TestCase):
     def test_model_names_have_matching_preset_lists(self) -> None:

@@ -40,6 +40,7 @@ The left panel is the main control surface.
 | `enter`          | Open a picker, or toggle the selected row (mode, preset, waveform, ...)  |
 | `space`          | Pause / resume                                                           |
 | `tab`            | Show / hide the left control panel                                       |
+| `p`              | Show / hide the pressure-volume loop panel                               |
 | `r`              | Reset simulation                                                         |
 | `q`              | Quit                                                                     |
 
