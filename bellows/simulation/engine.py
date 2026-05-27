@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from bellows.simulation.mechanics import apply_ventilator_intent
 from bellows.simulation.metrics import BreathAccumulator, BreathHistory, BreathSummary
 from bellows.simulation.phase import PHASE_EXPIRATION
 from bellows.simulation.state import (
@@ -13,6 +14,8 @@ from bellows.simulation.state import (
 )
 from bellows.ventilator.modes.base import VentilatorMode
 from bellows.ventilator.registry import default_modes
+
+INTEGRATION_EPSILON_S = 1e-9
 
 
 @dataclass
@@ -25,6 +28,7 @@ class VentilationSimulation:
     time_s: float = 0.0
     breath_time_s: float = 0.0
     lung_volume_l: float = field(default=0.0, init=False)
+    airway_pressure_cm_h2o: float = field(default=0.0, init=False)
     breath: int = 0
     modes: dict[str, VentilatorMode] = field(default_factory=default_modes)
     breath_history: BreathHistory = field(default_factory=BreathHistory)
@@ -36,11 +40,13 @@ class VentilationSimulation:
 
     def __post_init__(self) -> None:
         self.lung_volume_l = self._equilibrium_volume()
+        self.airway_pressure_cm_h2o = self._resting_floor_pressure()
 
     def reset(self) -> None:
         self.time_s = 0.0
         self.breath_time_s = 0.0
         self.lung_volume_l = self._equilibrium_volume()
+        self.airway_pressure_cm_h2o = self._resting_floor_pressure()
         self.breath = 0
         self.pending_settings = None
         self._active_mode_name = None
@@ -53,25 +59,57 @@ class VentilationSimulation:
 
     def _equilibrium_volume(self) -> float:
         return self.patient.lung_model.equilibrium_volume(
-            self.settings.peep_cm_h2o, PHASE_EXPIRATION
+            self._resting_floor_pressure(),
+            PHASE_EXPIRATION,
         )
+
+    def _resting_floor_pressure(self) -> float:
+        try:
+            return self.mode_for(self.settings.mode).resting_floor_pressure(
+                self.settings
+            )
+        except ValueError:
+            return self.settings.peep_cm_h2o
 
     def queue_settings(self, settings: VentilatorSettings) -> None:
         self.pending_settings = settings
 
     def step(self, dt_s: float) -> SimulationSample:
+        return self.step_many(dt_s)[-1]
+
+    def step_many(self, dt_s: float) -> list[SimulationSample]:
+        remaining_s = dt_s
+        samples: list[SimulationSample] = []
+
+        while remaining_s > INTEGRATION_EPSILON_S:
+            substep_s = min(remaining_s, self._time_to_next_integration_boundary())
+            if substep_s <= INTEGRATION_EPSILON_S:
+                substep_s = remaining_s
+            samples.append(self._step_subinterval(substep_s))
+            remaining_s -= substep_s
+
+        if not samples:
+            samples.append(self._step_subinterval(0.0))
+        return samples
+
+    def _step_subinterval(self, dt_s: float) -> SimulationSample:
         mode = self._active_mode()
         phase_time_s = self.breath_time_s
         breath = self.breath
 
-        step = mode.step(
+        intent = mode.step(
             self.settings,
-            self.patient,
             phase_time_s,
-            self.lung_volume_l,
-            dt_s,
+        )
+        step = apply_ventilator_intent(
+            self.patient,
+            intent,
+            lung_volume_l=self.lung_volume_l,
+            airway_pressure_cm_h2o=self.airway_pressure_cm_h2o,
+            dt_s=dt_s,
         )
         self.lung_volume_l = step.lung_volume_l
+        self.airway_pressure_cm_h2o = step.pressure_cm_h2o
         co2_kpa = self._co2(phase_time_s)
 
         sample = SimulationSample(
@@ -97,6 +135,21 @@ class VentilationSimulation:
                 mode = self._active_mode()
 
         return sample
+
+    def _time_to_next_integration_boundary(self) -> float:
+        settings = self.settings
+        cycle_remaining_s = settings.cycle_s - self.breath_time_s
+        candidates = [cycle_remaining_s]
+        if self.breath_time_s < settings.inspiratory_time_s:
+            candidates.append(settings.inspiratory_time_s - self.breath_time_s)
+        positive = [
+            candidate
+            for candidate in candidates
+            if candidate > INTEGRATION_EPSILON_S
+        ]
+        if not positive:
+            return settings.cycle_s
+        return min(positive)
 
     def _active_mode(self) -> VentilatorMode:
         mode = self.mode_for(self.settings.mode)

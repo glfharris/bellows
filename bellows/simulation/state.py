@@ -27,6 +27,8 @@ class VentilatorSettings:
     p_low_cm_h2o: float = 5.0
     t_high_s: float = 4.0
     t_low_s: float = 0.6
+    expiratory_valve_resistance_cm_h2o_s_per_l: float = 3.0
+    pressure_rise_time_s: float = 0.08
 
     def __post_init__(self) -> None:
         if self.rr_bpm <= 0.0:
@@ -45,6 +47,13 @@ class VentilatorSettings:
             raise ValueError("p_high_cm_h2o must be greater than p_low_cm_h2o")
         if self.t_high_s <= 0.0 or self.t_low_s <= 0.0:
             raise ValueError("t_high_s and t_low_s must be greater than zero")
+        if self.expiratory_valve_resistance_cm_h2o_s_per_l < 0.0:
+            raise ValueError(
+                "expiratory_valve_resistance_cm_h2o_s_per_l must be greater "
+                "than or equal to zero"
+            )
+        if self.pressure_rise_time_s < 0.0:
+            raise ValueError("pressure_rise_time_s must be greater than or equal to zero")
 
     @property
     def cycle_s(self) -> float:

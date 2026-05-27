@@ -116,6 +116,8 @@ class AppControlTests(unittest.TestCase):
 
         _advance_until_pending_settings_apply(app)
         app.action_select_next_control()
+        app.action_select_next_control()
+        app.action_select_next_control()
 
         self.assertEqual(app.simulation.settings.mode, "APRV")
         self.assertIn("p_high", [row.key for row in app.control_rows])
@@ -143,6 +145,30 @@ class AppControlTests(unittest.TestCase):
         self.assertIsNotNone(app.simulation.pending_settings)
         self.assertEqual(app.simulation.pending_settings.vt_ml, 525.0)
 
+    def test_expiratory_valve_adjust_uses_catalog_action(self) -> None:
+        app = BellowsApp()
+        _select_control(app, "exp_valve")
+
+        app._adjust_selected_control(1)
+
+        self.assertIsNotNone(app.simulation.pending_settings)
+        self.assertEqual(
+            app.simulation.pending_settings.expiratory_valve_resistance_cm_h2o_s_per_l,
+            4.0,
+        )
+
+    def test_rise_time_adjust_uses_catalog_action(self) -> None:
+        app = BellowsApp()
+        _select_control(app, "rise_time")
+
+        app._adjust_selected_control(1)
+
+        self.assertIsNotNone(app.simulation.pending_settings)
+        self.assertAlmostEqual(
+            app.simulation.pending_settings.pressure_rise_time_s,
+            0.09,
+        )
+
     def test_selected_waveform_activation_uses_catalog_action(self) -> None:
         app = BellowsApp()
         _select_control(app, "co2")
@@ -150,6 +176,25 @@ class AppControlTests(unittest.TestCase):
         app.action_activate_selected_control()
 
         self.assertTrue(app.waveform_visible["co2"])
+
+    def test_pv_loop_activation_uses_catalog_action(self) -> None:
+        app = BellowsApp()
+        _select_control(app, "pv_loop")
+
+        app.action_activate_selected_control()
+
+        self.assertFalse(app.waveform_visible["pv_loop"])
+
+    def test_tick_collects_pressure_volume_loop_points(self) -> None:
+        app = BellowsApp()
+
+        app._tick()
+
+        self.assertGreater(len(app.loop_points), 0)
+        point = app.loop_points[-1]
+        self.assertEqual(point.breath, app.simulation.breath)
+        self.assertGreaterEqual(point.x, 0.0)
+        self.assertGreaterEqual(point.y, 0.0)
 
 
 if __name__ == "__main__":

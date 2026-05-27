@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, replace
 
 from rich.text import Text
@@ -31,6 +32,7 @@ from bellows.simulation.state import (
 from bellows.ventilator.modes.base import VentilatorMode
 from bellows.ventilator.registry import VENTILATOR_MODES
 from bellows.waveforms.buffers import TraceBuffer
+from bellows.ui.loop import LoopPoint, LoopSpec, LoopWidget, loop_points_by_breath
 from bellows.ui.waveform import WaveformSpec, WaveformWidget
 
 
@@ -93,6 +95,18 @@ CONTROL_DEFINITIONS: dict[str, ControlDefinition] = {
         "I:E",
         decrease=_action("action_ie_shorter"),
         increase=_action("action_ie_longer"),
+    ),
+    "exp_valve": ControlDefinition(
+        "exp_valve",
+        "Exp valve",
+        decrease=_action("action_exp_valve_down"),
+        increase=_action("action_exp_valve_up"),
+    ),
+    "rise_time": ControlDefinition(
+        "rise_time",
+        "Rise time",
+        decrease=_action("action_rise_time_down"),
+        increase=_action("action_rise_time_up"),
     ),
     "p_high": ControlDefinition(
         "p_high",
@@ -194,6 +208,13 @@ CONTROL_DEFINITIONS: dict[str, ControlDefinition] = {
         increase=_action("_toggle_waveform", "volume"),
         activate=_action("_toggle_waveform", "volume"),
     ),
+    "pv_loop": ControlDefinition(
+        "pv_loop",
+        "PV loop",
+        decrease=_action("_toggle_waveform", "pv_loop"),
+        increase=_action("_toggle_waveform", "pv_loop"),
+        activate=_action("_toggle_waveform", "pv_loop"),
+    ),
     "co2": ControlDefinition(
         "co2",
         "CO2 trace",
@@ -204,7 +225,7 @@ CONTROL_DEFINITIONS: dict[str, ControlDefinition] = {
 }
 
 VENEGAS_PATIENT_CONTROLS = ("inflection", "slope", "recruitable")
-WAVEFORM_CONTROLS = ("autoscale", "pressure", "flow", "volume", "co2")
+WAVEFORM_CONTROLS = ("autoscale", "pressure", "flow", "volume", "pv_loop", "co2")
 
 
 class ChoiceModal(ModalScreen[str | None]):
@@ -409,13 +430,16 @@ class BellowsApp(App[None]):
             "volume": TraceBuffer(2400),
             "co2": TraceBuffer(2400),
         }
+        self.loop_points: deque[LoopPoint] = deque(maxlen=2400)
         self.waveform_visible = {
             "pressure": True,
             "flow": True,
             "volume": True,
+            "pv_loop": True,
             "co2": False,
         }
         self.waveforms: dict[str, WaveformWidget] = {}
+        self.pv_loop: LoopWidget | None = None
         self.status: Static | None = None
         self.numerics: Static | None = None
         self.sidebar: Static | None = None
@@ -448,10 +472,26 @@ class BellowsApp(App[None]):
                     WaveformSpec("Volume", "mL", "#72d572", 0.0, 1000.0),
                     id="volume",
                 )
+                pv_loop = LoopWidget(
+                    LoopSpec(
+                        "PV Loop",
+                        "mL",
+                        "cmH2O",
+                        0.0,
+                        1000.0,
+                        0.0,
+                        50.0,
+                        "#f5c451",
+                        "#9b7c35",
+                    ),
+                    id="pv_loop",
+                )
                 co2 = WaveformWidget(
                     WaveformSpec("CO2", "kPa", "#d78cff", 0.0, 7.0),
                     id="co2",
                 )
+                self.pv_loop = pv_loop
+                pv_loop.display = self.waveform_visible["pv_loop"]
                 co2.display = self.waveform_visible["co2"]
                 self.waveforms = {
                     "pressure": pressure,
@@ -462,6 +502,7 @@ class BellowsApp(App[None]):
                 yield pressure
                 yield flow
                 yield volume
+                yield pv_loop
                 yield co2
         yield Static(
             "EDUCATIONAL SIMULATOR ONLY - not for clinical care",
@@ -521,6 +562,7 @@ class BellowsApp(App[None]):
         self.simulation.reset()
         for buffer in self.buffers.values():
             buffer.clear()
+        self.loop_points.clear()
         self.message = "Simulation reset"
         self._refresh_waveforms()
         self._refresh_static_panels()
@@ -617,6 +659,52 @@ class BellowsApp(App[None]):
         settings = self._editable_settings()
         value = min(4.0, settings.ie_e + 0.5)
         self._set_settings(replace(settings, ie_e=value), f"I:E 1:{value:g}")
+
+    def action_exp_valve_down(self) -> None:
+        if self._ventilator_setting_change_blocked():
+            return
+        settings = self._editable_settings()
+        value = max(
+            0.0,
+            settings.expiratory_valve_resistance_cm_h2o_s_per_l - 1.0,
+        )
+        self._set_settings(
+            replace(settings, expiratory_valve_resistance_cm_h2o_s_per_l=value),
+            f"Exp valve {value:.0f} cmH2O*s/L",
+        )
+
+    def action_exp_valve_up(self) -> None:
+        if self._ventilator_setting_change_blocked():
+            return
+        settings = self._editable_settings()
+        value = min(
+            20.0,
+            settings.expiratory_valve_resistance_cm_h2o_s_per_l + 1.0,
+        )
+        self._set_settings(
+            replace(settings, expiratory_valve_resistance_cm_h2o_s_per_l=value),
+            f"Exp valve {value:.0f} cmH2O*s/L",
+        )
+
+    def action_rise_time_down(self) -> None:
+        if self._ventilator_setting_change_blocked():
+            return
+        settings = self._editable_settings()
+        value = max(0.02, settings.pressure_rise_time_s - 0.01)
+        self._set_settings(
+            replace(settings, pressure_rise_time_s=value),
+            f"Rise time {value * 1000:.0f} ms",
+        )
+
+    def action_rise_time_up(self) -> None:
+        if self._ventilator_setting_change_blocked():
+            return
+        settings = self._editable_settings()
+        value = min(0.30, settings.pressure_rise_time_s + 0.01)
+        self._set_settings(
+            replace(settings, pressure_rise_time_s=value),
+            f"Rise time {value * 1000:.0f} ms",
+        )
 
     def action_compliance_down(self) -> None:
         self._nudge_linear_compliance(-0.005)
@@ -838,6 +926,8 @@ class BellowsApp(App[None]):
         lung_model_name = self.simulation.patient.lung_model.name
 
         rows: list[ControlRow] = [CONTROL_DEFINITIONS["mode"].row()]
+        rows.append(CONTROL_DEFINITIONS["exp_valve"].row())
+        rows.append(CONTROL_DEFINITIONS["rise_time"].row())
         rows.extend(self._control_rows_for(mode.control_keys))
 
         rows.extend(self._control_rows_for(("lung_model", "preset")))
@@ -886,10 +976,13 @@ class BellowsApp(App[None]):
         self.waveform_visible[waveform] = visible
         if waveform in self.waveforms:
             self.waveforms[waveform].display = visible
+        elif waveform == "pv_loop" and self.pv_loop is not None:
+            self.pv_loop.display = visible
+        kind = "panel" if waveform == "pv_loop" else "waveform"
         self.message = (
-            f"{self._waveform_label(waveform)} waveform shown"
+            f"{self._waveform_label(waveform)} {kind} shown"
             if visible
-            else f"{self._waveform_label(waveform)} waveform hidden"
+            else f"{self._waveform_label(waveform)} {kind} hidden"
         )
         self._refresh_static_panels()
 
@@ -1023,13 +1116,25 @@ class BellowsApp(App[None]):
         if not self.paused:
             for _ in range(self.samples_per_render):
                 had_pending_settings = self.simulation.pending_settings is not None
-                sample = self.simulation.step(self.dt_s)
+                samples = self.simulation.step_many(self.dt_s)
                 if had_pending_settings and self.simulation.pending_settings is None:
                     settings_applied = True
-                self.buffers["pressure"].append(sample.time_s, sample.pressure_cm_h2o)
-                self.buffers["flow"].append(sample.time_s, sample.flow_l_min)
-                self.buffers["volume"].append(sample.time_s, sample.volume_ml)
-                self.buffers["co2"].append(sample.time_s, sample.co2_kpa)
+                for sample in samples:
+                    self.buffers["pressure"].append(
+                        sample.time_s,
+                        sample.pressure_cm_h2o,
+                    )
+                    self.buffers["flow"].append(sample.time_s, sample.flow_l_min)
+                    self.buffers["volume"].append(sample.time_s, sample.volume_ml)
+                    self.buffers["co2"].append(sample.time_s, sample.co2_kpa)
+                    self.loop_points.append(
+                        LoopPoint(
+                            breath=sample.breath,
+                            x=sample.volume_ml,
+                            y=sample.pressure_cm_h2o,
+                            phase=sample.phase,
+                        )
+                    )
 
         if settings_applied:
             self._rebuild_control_rows()
@@ -1046,6 +1151,12 @@ class BellowsApp(App[None]):
                 window_start_s=earliest,
                 window_end_s=self.simulation.time_s,
             )
+        if self.pv_loop is not None:
+            current, previous = loop_points_by_breath(
+                list(self.loop_points),
+                self.simulation.breath,
+            )
+            self.pv_loop.update_points(current, previous)
 
     def _refresh_static_panels(self) -> None:
         settings = self.simulation.settings
@@ -1090,6 +1201,28 @@ class BellowsApp(App[None]):
                     "mode",
                     "Mode",
                     self._mode_text(settings, pending),
+                ),
+                self._control_row(
+                    "exp_valve",
+                    "Exp valve",
+                    self._setting_text(
+                        settings.expiratory_valve_resistance_cm_h2o_s_per_l,
+                        (
+                            pending.expiratory_valve_resistance_cm_h2o_s_per_l
+                            if pending
+                            else None
+                        ),
+                        " cmH2O*s/L",
+                    ),
+                ),
+                self._control_row(
+                    "rise_time",
+                    "Rise time",
+                    self._setting_text(
+                        settings.pressure_rise_time_s * 1000.0,
+                        pending.pressure_rise_time_s * 1000.0 if pending else None,
+                        " ms",
+                    ),
                 ),
             ]
             if pending is not None:
@@ -1146,6 +1279,11 @@ class BellowsApp(App[None]):
                         "volume",
                         "Volume",
                         self._visible_text("volume"),
+                    ),
+                    self._control_row(
+                        "pv_loop",
+                        "PV loop",
+                        self._visible_text("pv_loop"),
                     ),
                     self._control_row(
                         "co2",
@@ -1301,6 +1439,7 @@ class BellowsApp(App[None]):
             "pressure": "Pressure",
             "flow": "Flow",
             "volume": "Volume",
+            "pv_loop": "PV loop",
             "co2": "CO2",
         }
         return labels[waveform]

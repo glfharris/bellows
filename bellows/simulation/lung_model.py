@@ -29,6 +29,9 @@ from typing import Protocol
 from bellows.simulation.phase import PHASE_EXPIRATION, PHASE_INSPIRATION
 
 
+VENEGAS_FRACTION_EPSILON = 1e-4
+
+
 class LungModel(Protocol):
     """Phase-aware elastic PV relationship.
 
@@ -198,7 +201,32 @@ def _venegas_pressure(
     # Inverse of V = a + b / (1 + exp(-(P-c)/d))
     # P = c - d * ln(b/(V-a) - 1)
     frac = (volume_l - a_l) / b_l
-    frac = max(1e-4, min(1.0 - 1e-4, frac))
+    lower_frac = VENEGAS_FRACTION_EPSILON
+    upper_frac = 1.0 - VENEGAS_FRACTION_EPSILON
+    if lower_frac <= frac <= upper_frac:
+        return _venegas_pressure_from_fraction(frac, c_cm_h2o, d_cm_h2o)
+
+    bounded_frac = max(lower_frac, min(upper_frac, frac))
+    bounded_volume_l = a_l + b_l * bounded_frac
+    bounded_pressure = _venegas_pressure_from_fraction(
+        bounded_frac,
+        c_cm_h2o,
+        d_cm_h2o,
+    )
+    bounded_slope = _venegas_slope(
+        bounded_volume_l,
+        a_l,
+        b_l,
+        d_cm_h2o,
+    )
+    return bounded_pressure + bounded_slope * (volume_l - bounded_volume_l)
+
+
+def _venegas_pressure_from_fraction(
+    frac: float,
+    c_cm_h2o: float,
+    d_cm_h2o: float,
+) -> float:
     return c_cm_h2o - d_cm_h2o * math.log(1.0 / frac - 1.0)
 
 
@@ -225,7 +253,10 @@ def _venegas_slope(
     # Local compliance C_local = dV/dP = (b/d) * frac * (1 - frac).
     # Slope = dP/dV = 1 / C_local.
     frac = (volume_l - a_l) / b_l
-    frac = max(1e-4, min(1.0 - 1e-4, frac))
+    frac = max(
+        VENEGAS_FRACTION_EPSILON,
+        min(1.0 - VENEGAS_FRACTION_EPSILON, frac),
+    )
     local_c = (b_l / d_cm_h2o) * frac * (1.0 - frac)
     return 1.0 / max(local_c, 1e-3)
 

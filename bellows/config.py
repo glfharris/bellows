@@ -34,6 +34,8 @@ def build_simulation_config(
     p_low_cm_h2o: float | None = None,
     t_high_s: float | None = None,
     t_low_s: float | None = None,
+    expiratory_valve_resistance_cm_h2o_s_per_l: float | None = None,
+    pressure_rise_time_s: float | None = None,
     lung_model: str | None = None,
     preset: str | None = None,
 ) -> SimulationConfig:
@@ -50,6 +52,10 @@ def build_simulation_config(
         p_low_cm_h2o=p_low_cm_h2o,
         t_high_s=t_high_s,
         t_low_s=t_low_s,
+        expiratory_valve_resistance_cm_h2o_s_per_l=(
+            expiratory_valve_resistance_cm_h2o_s_per_l
+        ),
+        pressure_rise_time_s=pressure_rise_time_s,
     )
     patient_preset = _select_patient_preset(lung_model, preset)
     return SimulationConfig(
@@ -89,6 +95,8 @@ def _build_settings(
     p_low_cm_h2o: float | None,
     t_high_s: float | None,
     t_low_s: float | None,
+    expiratory_valve_resistance_cm_h2o_s_per_l: float | None,
+    pressure_rise_time_s: float | None,
 ) -> VentilatorSettings:
     settings = VentilatorSettings()
     updates: dict[str, float | str] = {}
@@ -110,6 +118,12 @@ def _build_settings(
     _set_if_present(updates, "p_low_cm_h2o", p_low_cm_h2o)
     _set_if_present(updates, "t_high_s", t_high_s)
     _set_if_present(updates, "t_low_s", t_low_s)
+    _set_if_present(
+        updates,
+        "expiratory_valve_resistance_cm_h2o_s_per_l",
+        expiratory_valve_resistance_cm_h2o_s_per_l,
+    )
+    _set_if_present(updates, "pressure_rise_time_s", pressure_rise_time_s)
 
     if ie is not None:
         ie_i, ie_e = parse_ie_ratio(ie)

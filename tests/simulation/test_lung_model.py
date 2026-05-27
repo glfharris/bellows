@@ -58,6 +58,14 @@ class VenegasLungTests(unittest.TestCase):
         self.assertLess(slope_mid, slope_low)
         self.assertLess(slope_mid, slope_high)
 
+    def test_pressure_keeps_rising_beyond_recruitable_volume(self) -> None:
+        lung = VenegasLung(recruitable_volume_l=1.2)
+
+        near_capacity = lung.elastic_pressure(1.2, PHASE_INSPIRATION)
+        over_capacity = lung.elastic_pressure(1.4, PHASE_INSPIRATION)
+
+        self.assertGreater(over_capacity, near_capacity)
+
     def test_rejects_non_physical_shape_parameters(self) -> None:
         with self.assertRaisesRegex(ValueError, "slope_width"):
             VenegasLung(slope_width_cm_h2o=0.0)

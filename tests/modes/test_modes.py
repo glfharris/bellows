@@ -13,7 +13,10 @@ from dataclasses import replace
 
 from bellows.simulation.engine import VentilationSimulation
 from bellows.simulation.lung_model import LinearLung
+from bellows.simulation.mechanics import apply_ventilator_intent
+from bellows.simulation.phase import PHASE_EXPIRATION
 from bellows.simulation.state import PatientMechanics, VentilatorSettings
+from bellows.ventilator.modes.base import passive_expiration
 from tests.helpers import per_breath_tidal, run_for_seconds
 
 
@@ -48,6 +51,24 @@ class VolumeControlTests(unittest.TestCase):
         low_peak = max(s.pressure_cm_h2o for s in low_samples)
         high_peak = max(s.pressure_cm_h2o for s in high_samples)
         self.assertGreater(high_peak, low_peak)
+
+    def test_large_step_splits_at_inspiratory_boundary(self) -> None:
+        sim = VentilationSimulation(
+            settings=VentilatorSettings(
+                mode="VCV",
+                rr_bpm=60.0,
+                vt_ml=500.0,
+                peep_cm_h2o=0.0,
+                ie_i=1.0,
+                ie_e=1.0,
+            )
+        )
+
+        samples = sim.step_many(0.75)
+
+        self.assertGreater(len(samples), 1)
+        self.assertLessEqual(max(sample.volume_ml for sample in samples), 500.0)
+        self.assertEqual(samples[-1].phase, PHASE_EXPIRATION)
 
 
 class PressureControlTests(unittest.TestCase):
@@ -86,6 +107,54 @@ class PressureControlTests(unittest.TestCase):
         # Expiratory flow is negative; "more flow" means more negative.
         self.assertLess(low_r_peak_exp, high_r_peak_exp)
 
+    def test_pressure_target_has_finite_rise_time(self) -> None:
+        sim = VentilationSimulation(
+            settings=VentilatorSettings(
+                mode="PCV",
+                rr_bpm=10.0,
+                peep_cm_h2o=5.0,
+                pinsp_cm_h2o=20.0,
+                pressure_rise_time_s=0.08,
+            )
+        )
+
+        first = sim.step(0.01)
+        samples = run_for_seconds(sim, 0.1)
+
+        self.assertGreater(first.pressure_cm_h2o, 5.0)
+        self.assertLess(first.pressure_cm_h2o, 25.0)
+        self.assertGreater(samples[-1].pressure_cm_h2o, 23.0)
+        self.assertLess(samples[-1].pressure_cm_h2o, 25.5)
+
+    def test_pressure_is_stateful_across_expiratory_transition(self) -> None:
+        sim = VentilationSimulation(
+            settings=VentilatorSettings(
+                mode="PCV",
+                rr_bpm=10.0,
+                peep_cm_h2o=5.0,
+                pinsp_cm_h2o=20.0,
+                pressure_rise_time_s=0.08,
+            )
+        )
+
+        samples = []
+        for _ in range(260):
+            samples.extend(sim.step_many(0.01))
+
+        first_exp_index = next(
+            index
+            for index, sample in enumerate(samples)
+            if sample.phase == PHASE_EXPIRATION
+        )
+        last_insp = samples[first_exp_index - 1]
+        first_exp = samples[first_exp_index]
+
+        self.assertGreater(first_exp.pressure_cm_h2o, sim.settings.peep_cm_h2o)
+        self.assertLess(
+            last_insp.pressure_cm_h2o - first_exp.pressure_cm_h2o,
+            6.0,
+        )
+
 
 class PEEPTests(unittest.TestCase):
     def test_higher_peep_raises_baseline_pressure(self) -> None:
@@ -106,6 +175,59 @@ class PEEPTests(unittest.TestCase):
         self.assertAlmostEqual(low, 5.0, delta=0.5)
         self.assertAlmostEqual(high, 10.0, delta=0.5)
         self.assertGreater(high, low)
+
+
+class ExpiratoryValveTests(unittest.TestCase):
+    def test_valve_resistance_raises_airway_pressure_during_expiratory_flow(
+        self,
+    ) -> None:
+        patient = PatientMechanics(
+            lung_model=LinearLung(compliance_l_per_cm_h2o=0.05),
+            resistance_cm_h2o_s_per_l=10.0,
+        )
+        ideal_valve = apply_ventilator_intent(
+            patient,
+            passive_expiration(
+                VentilatorSettings(expiratory_valve_resistance_cm_h2o_s_per_l=0.0),
+            ),
+            lung_volume_l=1.0,
+            airway_pressure_cm_h2o=5.0,
+            dt_s=0.01,
+        )
+        resistive_valve = apply_ventilator_intent(
+            patient,
+            passive_expiration(
+                VentilatorSettings(expiratory_valve_resistance_cm_h2o_s_per_l=5.0),
+            ),
+            lung_volume_l=1.0,
+            airway_pressure_cm_h2o=5.0,
+            dt_s=0.01,
+        )
+
+        self.assertAlmostEqual(ideal_valve.pressure_cm_h2o, 5.0)
+        self.assertGreater(resistive_valve.pressure_cm_h2o, 5.0)
+        self.assertGreater(resistive_valve.flow_l_s, ideal_valve.flow_l_s)
+
+    def test_reported_flow_matches_volume_change_when_volume_hits_zero(self) -> None:
+        settings = VentilatorSettings(
+            peep_cm_h2o=0.0,
+            expiratory_valve_resistance_cm_h2o_s_per_l=0.0,
+        )
+        patient = PatientMechanics(
+            lung_model=LinearLung(compliance_l_per_cm_h2o=0.05),
+            resistance_cm_h2o_s_per_l=1.0,
+        )
+
+        step = apply_ventilator_intent(
+            patient,
+            passive_expiration(settings),
+            lung_volume_l=0.01,
+            airway_pressure_cm_h2o=0.0,
+            dt_s=1.0,
+        )
+
+        self.assertEqual(step.lung_volume_l, 0.0)
+        self.assertAlmostEqual(step.flow_l_s, -0.01)
 
 
 class PRVCTests(unittest.TestCase):

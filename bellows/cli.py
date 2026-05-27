@@ -30,6 +30,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             p_low_cm_h2o=args.p_low,
             t_high_s=args.t_high,
             t_low_s=args.t_low,
+            expiratory_valve_resistance_cm_h2o_s_per_l=args.exp_valve_resistance,
+            pressure_rise_time_s=args.rise_time,
             lung_model=args.lung_model,
             preset=args.preset,
         )
@@ -138,6 +140,18 @@ def _add_startup_options(parser: argparse.ArgumentParser) -> None:
         help="APRV high time.",
     )
     ventilator.add_argument("--t-low", type=float, metavar="S", help="APRV low time.")
+    ventilator.add_argument(
+        "--exp-valve-resistance",
+        type=float,
+        metavar="CMH2O*S/L",
+        help="Expiratory valve resistance.",
+    )
+    ventilator.add_argument(
+        "--rise-time",
+        type=float,
+        metavar="S",
+        help="Pressure-target rise time to about 95% of target.",
+    )
 
     patient = parser.add_argument_group("patient startup options")
     patient.add_argument(

@@ -28,7 +28,11 @@ def iter_samples(
     end_breath = simulation.breath + breaths if breaths is not None else None
 
     while _should_continue(simulation, end_time_s=end_time_s, end_breath=end_breath):
-        yield simulation.step(dt_s)
+        step_dt_s = dt_s
+        if end_time_s is not None:
+            step_dt_s = min(step_dt_s, max(0.0, end_time_s - simulation.time_s))
+        for sample in simulation.step_many(step_dt_s):
+            yield sample
 
 
 def run_samples(
@@ -56,7 +60,7 @@ def _should_continue(
 ) -> bool:
     if end_time_s is None and end_breath is None:
         return True
-    if end_time_s is not None and simulation.time_s >= end_time_s:
+    if end_time_s is not None and simulation.time_s >= end_time_s - 1e-9:
         return False
     if end_breath is not None and simulation.breath >= end_breath:
         return False

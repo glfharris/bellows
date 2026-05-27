@@ -59,6 +59,10 @@ class VentilatorSettingsTests(unittest.TestCase):
                 p_high_cm_h2o=5.0,
                 p_low_cm_h2o=5.0,
             )
+        with self.assertRaisesRegex(ValueError, "expiratory_valve_resistance"):
+            VentilatorSettings(expiratory_valve_resistance_cm_h2o_s_per_l=-1.0)
+        with self.assertRaisesRegex(ValueError, "pressure_rise_time_s"):
+            VentilatorSettings(pressure_rise_time_s=-0.01)
 
 
 class PatientMechanicsTests(unittest.TestCase):
@@ -88,6 +92,22 @@ class VentilationSimulationStateTests(unittest.TestCase):
         self.assertIsNone(sim.last_breath_summary)
         self.assertEqual(len(sim.breath_history), 0)
         self.assertAlmostEqual(sim.lung_volume_l, 0.4)
+        self.assertAlmostEqual(sim.airway_pressure_cm_h2o, 8.0)
+
+    def test_aprv_reset_uses_low_pressure_for_equilibrium(self) -> None:
+        sim = VentilationSimulation(
+            settings=VentilatorSettings(
+                mode="APRV",
+                peep_cm_h2o=10.0,
+                p_low_cm_h2o=2.0,
+            )
+        )
+        run_for_seconds(sim, 1.0)
+
+        sim.reset()
+
+        self.assertAlmostEqual(sim.lung_volume_l, 0.1)
+        self.assertAlmostEqual(sim.airway_pressure_cm_h2o, 2.0)
 
     def test_completed_breaths_are_stored_in_history(self) -> None:
         sim = VentilationSimulation(settings=VentilatorSettings(rr_bpm=12.0))
@@ -106,6 +126,19 @@ class VentilationSimulationStateTests(unittest.TestCase):
         sim = VentilationSimulation(settings=VentilatorSettings(mode="NOPE"))
         with self.assertRaisesRegex(ValueError, "Unknown ventilator mode 'NOPE'"):
             sim.step(0.01)
+
+    def test_step_many_returns_all_boundary_substeps(self) -> None:
+        sim = VentilationSimulation(settings=VentilatorSettings(rr_bpm=60.0))
+        convenience_sim = VentilationSimulation(
+            settings=VentilatorSettings(rr_bpm=60.0)
+        )
+
+        samples = sim.step_many(0.75)
+        final_sample = convenience_sim.step(0.75)
+
+        self.assertGreater(len(samples), 1)
+        self.assertEqual(samples[-1].phase, final_sample.phase)
+        self.assertAlmostEqual(samples[-1].time_s, final_sample.time_s)
 
     def test_patient_changes_take_effect_immediately(self) -> None:
         sim = VentilationSimulation(

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from bellows.simulation.metrics import BreathSummary
 from bellows.simulation.phase import PHASE_INSPIRATION
+from bellows.simulation.mechanics import VentilatorIntent
 from bellows.simulation.state import PatientMechanics, VentilatorSettings
 from bellows.ventilator.modes.base import (
-    ModeStep,
     VentilatorMode,
     passive_expiration,
 )
@@ -72,20 +72,19 @@ class PressureRegulatedVolumeControl(VentilatorMode):
     def step(
         self,
         settings: VentilatorSettings,
-        patient: PatientMechanics,
         phase_time_s: float,
-        lung_volume_l: float,
-        dt_s: float,
-    ) -> ModeStep:
+    ) -> VentilatorIntent:
         if phase_time_s >= settings.inspiratory_time_s:
-            return passive_expiration(settings, patient, lung_volume_l, dt_s)
+            return passive_expiration(
+                settings,
+                expiratory_valve_elapsed_s=(
+                    phase_time_s - settings.inspiratory_time_s
+                ),
+            )
 
         return _pcv_inspiration(
             settings,
-            patient,
             self.applied_pinsp_cm_h2o,
-            lung_volume_l,
-            dt_s,
         )
 
 

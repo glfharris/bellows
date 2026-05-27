@@ -15,6 +15,8 @@ class SimulationConfigTests(unittest.TestCase):
             vt_ml=450.0,
             rr_bpm=16.0,
             peep_cm_h2o=8.0,
+            expiratory_valve_resistance_cm_h2o_s_per_l=4.0,
+            pressure_rise_time_s=0.06,
             ie="1:3",
         )
 
@@ -22,6 +24,11 @@ class SimulationConfigTests(unittest.TestCase):
         self.assertEqual(config.settings.vt_ml, 450.0)
         self.assertEqual(config.settings.rr_bpm, 16.0)
         self.assertEqual(config.settings.peep_cm_h2o, 8.0)
+        self.assertEqual(
+            config.settings.expiratory_valve_resistance_cm_h2o_s_per_l,
+            4.0,
+        )
+        self.assertEqual(config.settings.pressure_rise_time_s, 0.06)
         self.assertEqual(config.settings.ie_i, 1.0)
         self.assertEqual(config.settings.ie_e, 3.0)
 
@@ -47,6 +54,10 @@ class SimulationConfigTests(unittest.TestCase):
             build_simulation_config(rr_bpm=0.0)
         with self.assertRaisesRegex(ValueError, "p_high_cm_h2o"):
             build_simulation_config(p_low_cm_h2o=30.0)
+        with self.assertRaisesRegex(ValueError, "expiratory_valve_resistance"):
+            build_simulation_config(expiratory_valve_resistance_cm_h2o_s_per_l=-1.0)
+        with self.assertRaisesRegex(ValueError, "pressure_rise_time_s"):
+            build_simulation_config(pressure_rise_time_s=-0.01)
 
     def test_parse_ie_ratio_requires_two_positive_numbers(self) -> None:
         self.assertEqual(parse_ie_ratio("1:2"), (1.0, 2.0))

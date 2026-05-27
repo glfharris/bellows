@@ -29,7 +29,7 @@ class SimulationRunnerTests(unittest.TestCase):
         run_samples(sim, seconds=1.0, dt_s=0.01)
         samples = run_samples(sim, seconds=1.0, dt_s=0.01)
 
-        self.assertEqual(len(samples), 100)
+        self.assertGreaterEqual(len(samples), 100)
         self.assertAlmostEqual(sim.time_s, 2.0)
 
     def test_rejects_invalid_runner_values(self) -> None:
@@ -40,6 +40,14 @@ class SimulationRunnerTests(unittest.TestCase):
             run_samples(sim, seconds=-1.0)
         with self.assertRaisesRegex(ValueError, "breaths"):
             run_samples(sim, breaths=-1)
+
+    def test_runner_includes_boundary_substep_samples(self) -> None:
+        sim = VentilationSimulation(settings=VentilatorSettings(rr_bpm=60.0))
+
+        samples = run_samples(sim, seconds=0.75, dt_s=0.75)
+
+        self.assertGreater(len(samples), 1)
+        self.assertAlmostEqual(sim.time_s, 0.75)
 
 
 if __name__ == "__main__":
