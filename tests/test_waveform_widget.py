@@ -40,13 +40,56 @@ class WaveformWidgetTests(unittest.TestCase):
                 TracePoint(0.01, -80.0),
                 TracePoint(1.00, 0.0),
             ],
-            window_start_s=0.0,
-            window_end_s=10.0,
+            window_start_s=-1.0,
+            window_end_s=9.0,
         )
 
         display_points = widget._display_points(sub_width=20, sub_height=20)
 
         self.assertEqual(display_points, [(0, 17), (2, 10)])
+
+    def test_sweep_display_breaks_segments_at_wraparound(self) -> None:
+        widget = WaveformWidget(
+            WaveformSpec("Pressure", "cmH2O", "#f5c451", 0.0, 40.0)
+        )
+        widget.update_points(
+            [
+                TracePoint(8.0, 10.0),
+                TracePoint(9.0, 20.0),
+                TracePoint(10.1, 30.0),
+                TracePoint(10.2, 25.0),
+            ],
+            window_start_s=-5.0,
+            window_end_s=5.0,
+        )
+
+        segments = widget._display_segments(sub_width=20, sub_height=20)
+
+        self.assertEqual(len(segments), 2)
+        self.assertGreater(segments[0][-1][0], segments[1][0][0])
+
+    def test_sweep_display_blanks_gap_at_write_head(self) -> None:
+        widget = WaveformWidget(
+            WaveformSpec("Pressure", "cmH2O", "#f5c451", 0.0, 40.0)
+        )
+        widget.update_points(
+            [
+                TracePoint(4.8, 10.0),
+                TracePoint(5.0, 20.0),
+                TracePoint(5.2, 30.0),
+                TracePoint(6.0, 25.0),
+            ],
+            window_start_s=-5.0,
+            window_end_s=5.0,
+        )
+
+        display_points = widget._display_points(sub_width=40, sub_height=20)
+        cursor_x = widget._cursor_x(40)
+
+        self.assertTrue(display_points)
+        self.assertTrue(
+            all(abs(x - cursor_x) > 1 for x, _y in display_points),
+        )
 
 
 if __name__ == "__main__":

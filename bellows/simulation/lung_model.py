@@ -172,6 +172,24 @@ class VenegasHysteresisLung:
         )
         return base + self._shift(phase)
 
+    def elastic_pressure_for_limb(self, volume_l: float, limb_state: float) -> float:
+        """Elastic pressure for a continuous hysteresis limb state.
+
+        ``limb_state`` is -1 on the expiratory limb and +1 on the inspiratory
+        limb. Intermediate values model a short scanning transition after flow
+        reversal, avoiding a discontinuous pressure jump at phase changes.
+        """
+
+        bounded_limb = max(-1.0, min(1.0, limb_state))
+        base = _venegas_pressure(
+            volume_l,
+            self.residual_volume_l,
+            self.recruitable_volume_l,
+            self.inflection_cm_h2o,
+            self.slope_width_cm_h2o,
+        )
+        return base + bounded_limb * self.hysteresis_offset_cm_h2o / 2.0
+
     def elastic_slope(self, volume_l: float, phase: str) -> float:
         # Slope is independent of the vertical shift.
         return _venegas_slope(

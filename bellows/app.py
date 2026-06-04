@@ -946,9 +946,9 @@ class BellowsApp(App[None]):
         lung_model_name = self.simulation.patient.lung_model.name
 
         rows: list[ControlRow] = [CONTROL_DEFINITIONS["mode"].row()]
+        rows.extend(self._control_rows_for(mode.control_keys))
         rows.append(CONTROL_DEFINITIONS["exp_valve"].row())
         rows.append(CONTROL_DEFINITIONS["rise_time"].row())
-        rows.extend(self._control_rows_for(mode.control_keys))
 
         rows.extend(self._control_rows_for(("lung_model", "preset")))
         if lung_model_name == "Linear":
@@ -1259,28 +1259,6 @@ class BellowsApp(App[None]):
                     "Mode",
                     self._mode_text(settings, pending),
                 ),
-                self._control_row(
-                    "exp_valve",
-                    "Exp valve",
-                    self._setting_text(
-                        settings.expiratory_valve_resistance_cm_h2o_s_per_l,
-                        (
-                            pending.expiratory_valve_resistance_cm_h2o_s_per_l
-                            if pending
-                            else None
-                        ),
-                        " cmH2O*s/L",
-                    ),
-                ),
-                self._control_row(
-                    "rise_time",
-                    "Rise time",
-                    self._setting_text(
-                        settings.pressure_rise_time_s * 1000.0,
-                        pending.pressure_rise_time_s * 1000.0 if pending else None,
-                        " ms",
-                    ),
-                ),
             ]
             if pending is not None:
                 mode = self.simulation.mode_for(pending.mode)
@@ -1291,6 +1269,34 @@ class BellowsApp(App[None]):
             display_mode_impl = self.simulation.mode_for(settings.mode)
             ventilator_section.extend(
                 self._ventilator_rows(display_mode_impl, settings, pending)
+            )
+            ventilator_section.extend(
+                [
+                    "",
+                    "[bold #8fa69d]ADVANCED[/]",
+                    self._control_row(
+                        "exp_valve",
+                        "Exp valve",
+                        self._setting_text(
+                            settings.expiratory_valve_resistance_cm_h2o_s_per_l,
+                            (
+                                pending.expiratory_valve_resistance_cm_h2o_s_per_l
+                                if pending
+                                else None
+                            ),
+                            " cmH2O*s/L",
+                        ),
+                    ),
+                    self._control_row(
+                        "rise_time",
+                        "Rise time",
+                        self._setting_text(
+                            settings.pressure_rise_time_s * 1000.0,
+                            pending.pressure_rise_time_s * 1000.0 if pending else None,
+                            " ms",
+                        ),
+                    ),
+                ]
             )
 
             sidebar_markup = "\n".join(

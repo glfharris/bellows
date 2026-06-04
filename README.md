@@ -87,7 +87,7 @@ Live-edit parameters depend on the selected model:
 
 Resistance and a patient preset are available across all models. Each model carries its own preset list (Linear: Normal / Stiff / Restrictive / Obstructed / Severe obstruction; Venegas variants add Recruitable ARDS / Non-recruitable ARDS / Surfactant-deficient). Manual edits change the displayed preset to `Custom`.
 
-CO2 is a simplified capnography trace with EtCO2 shown in kPa — enough to make waveform changes plausible, not a complete model.
+CO2 remains a simplified capnography trace in the simulator/TUI only. The web UI omits CO2 for now because it needs a more defensible physiological model before becoming a prominent browser feature.
 
 ---
 
@@ -98,14 +98,15 @@ Waveforms (fixed time axis, fixed y-axis ranges, smoother braille-cell rendering
 - pressure, cmH2O
 - flow, L/min
 - volume, mL (absolute)
-- CO2, kPa — optional, hidden by default
+- CO2, kPa — TUI only; optional, hidden by default
 
 Monitor numerics, computed from the last completed breath:
 
 - `Ppeak` (cmH2O)
+- `Pmean` (cmH2O)
 - `VT` (mL)
 - `MV` (L/min) — uses the actual cycle length, so APRV's minute volume is correct
-- `EtCO2` (kPa)
+- `EtCO2` (kPa) — TUI only
 
 ---
 

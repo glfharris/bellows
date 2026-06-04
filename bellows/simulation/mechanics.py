@@ -12,6 +12,7 @@ PRESSURE_RESPONSE_SETTLING_CONSTANT = 3.0
 CIRCUIT_COMPLIANCE_L_PER_CM_H2O = 0.002
 CIRCUIT_PRESSURE_RESPONSE_TIME_S = 0.04
 EXPIRATORY_VALVE_OPENING_TIME_S = 0.06
+HYSTERESIS_LIMB_TRANSITION_TIME_S = 0.08
 MAX_MECHANICS_SUBSTEP_S = 0.001
 
 
@@ -33,6 +34,8 @@ class VentilatorIntent:
     expiratory_valve_resistance_cm_h2o_s_per_l: float = 0.0
     expiratory_valve_open: bool = False
     expiratory_valve_elapsed_s: float | None = None
+    hysteresis_limb: float | None = None
+    hysteresis_limb_target: float | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,7 @@ class MechanicsStep:
     flow_l_s: float
     pressure_cm_h2o: float
     lung_volume_l: float
+    hysteresis_limb: float | None = None
 
 
 def apply_ventilator_intent(
@@ -67,18 +71,39 @@ def apply_ventilator_intent(
     substeps = max(1, ceil(dt_s / MAX_MECHANICS_SUBSTEP_S))
     sub_dt_s = dt_s / substeps
     valve_elapsed_s = intent.expiratory_valve_elapsed_s
+    hysteresis_limb = intent.hysteresis_limb
 
     for _ in range(substeps):
+        if (
+            hysteresis_limb is not None
+            and intent.hysteresis_limb_target is not None
+        ):
+            hysteresis_limb = advance_pressure(
+                hysteresis_limb,
+                intent.hysteresis_limb_target,
+                HYSTERESIS_LIMB_TRANSITION_TIME_S,
+                sub_dt_s,
+            )
+
         if (
             intent.expiratory_valve_open
             and intent.expiratory_valve_resistance_cm_h2o_s_per_l <= 0.0
         ):
             pressure_cm_h2o = intent.expiratory_floor_pressure_cm_h2o
 
-        elastic_cm_h2o = patient.lung_model.elastic_pressure(
-            volume_l,
-            intent.phase,
-        )
+        if hysteresis_limb is not None and hasattr(
+            patient.lung_model,
+            "elastic_pressure_for_limb",
+        ):
+            elastic_cm_h2o = patient.lung_model.elastic_pressure_for_limb(
+                volume_l,
+                hysteresis_limb,
+            )
+        else:
+            elastic_cm_h2o = patient.lung_model.elastic_pressure(
+                volume_l,
+                intent.phase,
+            )
         lung_flow_l_s = (
             pressure_cm_h2o - elastic_cm_h2o
         ) / max(patient.resistance_cm_h2o_s_per_l, 1e-3)
@@ -146,6 +171,7 @@ def apply_ventilator_intent(
         flow_l_s=(volume_l - initial_volume_l) / dt_s,
         pressure_cm_h2o=pressure_cm_h2o,
         lung_volume_l=volume_l,
+        hysteresis_limb=hysteresis_limb,
     )
 
 

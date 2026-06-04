@@ -34,6 +34,7 @@ class VentilationSimulation:
     breath: int = 0
     modes: dict[str, VentilatorMode] = field(default_factory=default_modes)
     breath_history: BreathHistory = field(default_factory=BreathHistory)
+    hysteresis_limb: float = field(default=-1.0, init=False)
     _active_mode_name: str | None = field(default=None, init=False)
     _breath_accumulator: BreathAccumulator = field(
         default_factory=BreathAccumulator,
@@ -51,6 +52,7 @@ class VentilationSimulation:
         self.airway_pressure_cm_h2o = self._resting_floor_pressure()
         self.breath = 0
         self.pending_settings = None
+        self.hysteresis_limb = -1.0
         self._active_mode_name = None
         self._breath_accumulator.clear()
         self.breath_history.clear()
@@ -168,6 +170,11 @@ class VentilationSimulation:
             self.settings,
             phase_time_s,
         )
+        intent = replace(
+            intent,
+            hysteresis_limb=self.hysteresis_limb,
+            hysteresis_limb_target=_hysteresis_limb_target(intent.phase),
+        )
         step = apply_ventilator_intent(
             self.patient,
             intent,
@@ -177,6 +184,8 @@ class VentilationSimulation:
         )
         self.lung_volume_l = step.lung_volume_l
         self.airway_pressure_cm_h2o = step.pressure_cm_h2o
+        if step.hysteresis_limb is not None:
+            self.hysteresis_limb = step.hysteresis_limb
         sample_time_s = self.time_s + dt_s
         sample_phase_time_s = phase_time_s + dt_s
         co2_kpa = self._co2(sample_phase_time_s)
@@ -259,3 +268,7 @@ class VentilationSimulation:
 
         plateau_fraction = (exp_fraction - 0.32) / 0.68
         return self.patient.etco2_kpa * (0.90 + 0.10 * min(1.0, plateau_fraction))
+
+
+def _hysteresis_limb_target(phase: str) -> float:
+    return 1.0 if phase == PHASE_INSPIRATION else -1.0

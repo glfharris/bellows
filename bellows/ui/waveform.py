@@ -22,7 +22,7 @@ class WaveformSpec:
 
 
 class WaveformWidget(Widget):
-    """Compact rolling trace renderer."""
+    """Compact sweep trace renderer."""
 
     SCALE_WIDTH = 6
 
@@ -124,15 +124,16 @@ class WaveformWidget(Widget):
         sub_width = width * 2
         sub_height = height * 4
         canvas = [[False for _ in range(sub_width)] for _ in range(sub_height)]
-        previous: tuple[int, int] | None = None
 
-        for mapped in self._display_points(sub_width, sub_height):
-            if previous is not None:
-                self._draw_line(canvas, previous, mapped)
-            else:
-                x, y = mapped
-                canvas[y][x] = True
-            previous = mapped
+        for segment in self._display_segments(sub_width, sub_height):
+            previous: tuple[int, int] | None = None
+            for mapped in segment:
+                if previous is not None:
+                    self._draw_line(canvas, previous, mapped)
+                else:
+                    x, y = mapped
+                    canvas[y][x] = True
+                previous = mapped
 
         return self._braille_rows(canvas, width, height)
 
@@ -141,11 +142,47 @@ class WaveformWidget(Widget):
         sub_width: int,
         sub_height: int,
     ) -> list[tuple[int, int]]:
-        by_x: dict[int, int] = {}
+        return [
+            point
+            for segment in self._display_segments(sub_width, sub_height)
+            for point in segment
+        ]
+
+    def _display_segments(
+        self,
+        sub_width: int,
+        sub_height: int,
+    ) -> list[list[tuple[int, int]]]:
+        segments: list[list[tuple[int, int]]] = []
+        current: list[tuple[int, int]] = []
+        previous_x: int | None = None
+
         for point in self.points:
             x, y = self._map_point(point, sub_width, sub_height)
-            by_x[x] = y
-        return sorted(by_x.items())
+            if self._x_in_blanking_gap(x, sub_width):
+                if current:
+                    segments.append(current)
+                current = []
+                previous_x = None
+                continue
+
+            if previous_x is not None and (
+                x < previous_x
+                or self._crosses_blanking_gap(previous_x, x, sub_width)
+            ):
+                if current:
+                    segments.append(current)
+                current = []
+
+            if current and current[-1][0] == x:
+                current[-1] = (x, y)
+            else:
+                current.append((x, y))
+            previous_x = x
+
+        if current:
+            segments.append(current)
+        return segments
 
     def _map_point(
         self,
@@ -153,8 +190,8 @@ class WaveformWidget(Widget):
         sub_width: int,
         sub_height: int,
     ) -> tuple[int, int]:
-        time_range = max(self.window_end_s - self.window_start_s, 0.001)
-        x_fraction = (point.time_s - self.window_start_s) / time_range
+        time_range = self._window_duration_s()
+        x_fraction = (point.time_s % time_range) / time_range
         x = round(max(0.0, min(1.0, x_fraction)) * (sub_width - 1))
 
         value_range = max(self.maximum - self.minimum, 0.001)
@@ -162,6 +199,29 @@ class WaveformWidget(Widget):
         y_fraction = max(0.0, min(1.0, y_fraction))
         y = round((1.0 - y_fraction) * (sub_height - 1))
         return x, y
+
+    def _cursor_x(self, sub_width: int) -> int:
+        duration = self._window_duration_s()
+        x_fraction = (self.window_end_s % duration) / duration
+        return round(max(0.0, min(1.0, x_fraction)) * (sub_width - 1))
+
+    def _x_in_blanking_gap(self, x: int, sub_width: int) -> bool:
+        cursor_x = self._cursor_x(sub_width)
+        half_gap = max(1, round(sub_width * 0.018))
+        distance = abs(x - cursor_x)
+        distance = min(distance, sub_width - distance)
+        return distance <= half_gap
+
+    def _crosses_blanking_gap(self, start_x: int, end_x: int, sub_width: int) -> bool:
+        if end_x < start_x:
+            return True
+        return any(
+            self._x_in_blanking_gap(x, sub_width)
+            for x in range(start_x, end_x + 1)
+        )
+
+    def _window_duration_s(self) -> float:
+        return max(self.window_end_s - self.window_start_s, 0.001)
 
     def _draw_line(
         self,
@@ -281,19 +341,17 @@ class WaveformWidget(Widget):
         tick_count = 5
         axis = ["─" for _ in range(width)]
         labels = [" " for _ in range(width)]
-        duration = max(self.window_end_s - self.window_start_s, 0.0)
+        duration = self._window_duration_s()
 
         for tick in range(tick_count):
             if tick_count == 1:
                 position = 0
-                seconds_from_now = 0.0
             else:
                 fraction = tick / (tick_count - 1)
                 position = round(fraction * (width - 1))
-                seconds_from_now = -duration * (1.0 - fraction)
 
             axis[position] = "┬"
-            label = "now" if tick == tick_count - 1 else f"{seconds_from_now:.0f}s"
+            label = f"{duration * tick / (tick_count - 1):.0f}s"
             label_start = min(max(0, position - len(label) // 2), width - len(label))
             for offset, character in enumerate(label):
                 labels[label_start + offset] = character

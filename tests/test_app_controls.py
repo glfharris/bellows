@@ -116,8 +116,6 @@ class AppControlTests(unittest.TestCase):
 
         _advance_until_pending_settings_apply(app)
         app.action_select_next_control()
-        app.action_select_next_control()
-        app.action_select_next_control()
 
         self.assertEqual(app.simulation.settings.mode, "APRV")
         self.assertIn("p_high", [row.key for row in app.control_rows])

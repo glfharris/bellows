@@ -91,6 +91,15 @@ class VenegasHysteresisTests(unittest.TestCase):
         )
         self.assertAlmostEqual(diff, 4.0, places=3)
 
+    def test_continuous_limb_state_interpolates_hysteresis_offset(self) -> None:
+        lung = VenegasHysteresisLung(hysteresis_offset_cm_h2o=4.0)
+        expiratory = lung.elastic_pressure_for_limb(0.5, -1.0)
+        middle = lung.elastic_pressure_for_limb(0.5, 0.0)
+        inspiratory = lung.elastic_pressure_for_limb(0.5, 1.0)
+
+        self.assertAlmostEqual(inspiratory - expiratory, 4.0, places=3)
+        self.assertAlmostEqual(middle, (inspiratory + expiratory) / 2.0)
+
     def test_rejects_negative_hysteresis_offset(self) -> None:
         with self.assertRaisesRegex(ValueError, "hysteresis_offset"):
             VenegasHysteresisLung(hysteresis_offset_cm_h2o=-1.0)
@@ -151,6 +160,38 @@ class SimulationIntegrationTests(unittest.TestCase):
         sim.patient = replace(sim.patient, lung_model=VenegasHysteresisLung())
         final = run_for_seconds(sim, 10.0)
         self.assertTrue(final)
+
+    def test_hysteresis_limb_state_changes_smoothly_at_phase_transition(self) -> None:
+        sim = VentilationSimulation(
+            settings=VentilatorSettings(
+                mode="PCV",
+                rr_bpm=20.0,
+                pinsp_cm_h2o=18.0,
+                peep_cm_h2o=5.0,
+            ),
+            patient=PatientMechanics(
+                lung_model=VenegasHysteresisLung(hysteresis_offset_cm_h2o=7.0),
+            ),
+        )
+
+        samples = []
+        limb_states = []
+        for _ in range(500):
+            step_samples = sim.step_many(0.01)
+            samples.extend(step_samples)
+            limb_states.extend([sim.hysteresis_limb] * len(step_samples))
+
+        transition_index = next(
+            index
+            for index, sample in enumerate(samples)
+            if sample.phase == PHASE_EXPIRATION
+        )
+
+        self.assertLess(
+            abs(limb_states[transition_index] - limb_states[transition_index - 1]),
+            1.0,
+        )
+        self.assertGreater(limb_states[transition_index], -1.0)
 
 
 if __name__ == "__main__":

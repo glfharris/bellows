@@ -42,6 +42,7 @@ class BreathAccumulatorTests(unittest.TestCase):
         self.assertEqual(summary.breath, 0)
         self.assertEqual(summary.vt_ml, 500.0)
         self.assertEqual(summary.peak_pressure_cm_h2o, 20.0)
+        self.assertEqual(summary.mean_pressure_cm_h2o, 12.5)
         self.assertEqual(summary.etco2_kpa, 5.0)
         self.assertAlmostEqual(summary.minute_volume_l_min, 6.0)
         self.assertIsNone(accumulator.current_breath)
@@ -95,6 +96,7 @@ def _summary(breath: int, start_time_s: float, end_time_s: float) -> BreathSumma
         min_volume_l=0.25,
         max_volume_l=0.75,
         peak_pressure_cm_h2o=20.0,
+        mean_pressure_cm_h2o=12.5,
         etco2_kpa=5.0,
     )
 

@@ -19,6 +19,7 @@ class BreathSummary:
     min_volume_l: float
     max_volume_l: float
     peak_pressure_cm_h2o: float
+    mean_pressure_cm_h2o: float
     etco2_kpa: float
 
     @property
@@ -52,6 +53,8 @@ class BreathAccumulator:
     current_min_volume_l: float = 0.0
     current_max_volume_l: float = 0.0
     current_peak_pressure_cm_h2o: float = 0.0
+    current_pressure_sum_cm_h2o: float = 0.0
+    current_pressure_count: int = 0
     current_etco2_kpa: float = 0.0
 
     def observe(self, sample: SimulationSample) -> None:
@@ -62,6 +65,8 @@ class BreathAccumulator:
             self.current_min_volume_l = volume_l
             self.current_max_volume_l = volume_l
             self.current_peak_pressure_cm_h2o = sample.pressure_cm_h2o
+            self.current_pressure_sum_cm_h2o = sample.pressure_cm_h2o
+            self.current_pressure_count = 1
             self.current_etco2_kpa = sample.co2_kpa
             return
 
@@ -71,6 +76,8 @@ class BreathAccumulator:
             self.current_peak_pressure_cm_h2o,
             sample.pressure_cm_h2o,
         )
+        self.current_pressure_sum_cm_h2o += sample.pressure_cm_h2o
+        self.current_pressure_count += 1
         self.current_etco2_kpa = max(self.current_etco2_kpa, sample.co2_kpa)
 
     def finish(self, *, end_time_s: float) -> BreathSummary | None:
@@ -84,6 +91,10 @@ class BreathAccumulator:
             min_volume_l=self.current_min_volume_l,
             max_volume_l=self.current_max_volume_l,
             peak_pressure_cm_h2o=self.current_peak_pressure_cm_h2o,
+            mean_pressure_cm_h2o=(
+                self.current_pressure_sum_cm_h2o
+                / max(1, self.current_pressure_count)
+            ),
             etco2_kpa=self.current_etco2_kpa,
         )
         self.clear()
@@ -95,6 +106,8 @@ class BreathAccumulator:
         self.current_min_volume_l = 0.0
         self.current_max_volume_l = 0.0
         self.current_peak_pressure_cm_h2o = 0.0
+        self.current_pressure_sum_cm_h2o = 0.0
+        self.current_pressure_count = 0
         self.current_etco2_kpa = 0.0
 
 

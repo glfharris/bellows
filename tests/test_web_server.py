@@ -19,6 +19,8 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("uPlot", response.text)
         self.assertIn("Bellows", response.text)
+        self.assertNotIn('id="co2"', response.text)
+        self.assertNotIn("EtCO2", response.text)
 
     def test_state_and_samples_endpoints_return_simulation_payloads(self) -> None:
         client = TestClient(create_app(build_simulation_config()))
@@ -34,6 +36,13 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(len(samples.json()["samples"]), 2)
         self.assertAlmostEqual(samples.json()["state"]["sample"]["time_s"], 0.02)
 
+        completed = client.get("/api/samples?seconds=5.0&dt_s=0.02")
+        self.assertIn(
+            "mean_pressure_cm_h2o",
+            completed.json()["state"]["last_breath_summary"],
+        )
+        self.assertIn("previous_breath_summary", completed.json()["state"])
+
     def test_settings_endpoint_queues_updates(self) -> None:
         client = TestClient(create_app(build_simulation_config()))
 
@@ -47,6 +56,37 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(state["settings"]["mode"], "VCV")
         self.assertEqual(state["pending_settings"]["mode"], "PCV")
         self.assertEqual(state["pending_settings"]["pinsp_cm_h2o"], 20.0)
+
+    def test_patient_endpoint_updates_lung_model_parameters(self) -> None:
+        client = TestClient(create_app(build_simulation_config()))
+
+        model = client.post("/api/patient", json={"lung_model": "Venegas+H"}).json()
+        self.assertEqual(model["patient"]["lung_model"], "Venegas+H")
+        self.assertIn("hysteresis_offset_cm_h2o", model["patient"]["lung_parameters"])
+
+        response = client.post(
+            "/api/patient",
+            json={
+                "inflection_cm_h2o": 24.0,
+                "slope_width_cm_h2o": 4.0,
+                "recruitable_volume_ml": 1000.0,
+                "hysteresis_offset_cm_h2o": 6.0,
+                "resistance_cm_h2o_s_per_l": 18.0,
+            },
+        )
+        state = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(state["patient"]["preset"], "Custom")
+        self.assertEqual(state["patient"]["resistance_cm_h2o_s_per_l"], 18.0)
+        self.assertEqual(
+            state["patient"]["lung_parameters"]["inflection_cm_h2o"],
+            24.0,
+        )
+        self.assertEqual(
+            state["patient"]["lung_parameters"]["hysteresis_offset_cm_h2o"],
+            6.0,
+        )
 
 
 if __name__ == "__main__":

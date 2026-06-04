@@ -54,6 +54,7 @@ def _summary(
         min_volume_l=min_volume_l,
         max_volume_l=max_volume_l,
         peak_pressure_cm_h2o=peak_pressure_cm_h2o,
+        mean_pressure_cm_h2o=peak_pressure_cm_h2o * 0.75,
         etco2_kpa=etco2_kpa,
     )
 
