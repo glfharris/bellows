@@ -67,6 +67,12 @@ class SimulationConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "greater than zero"):
             parse_ie_ratio("1:0")
 
+    def test_parse_ie_ratio_rejects_nonfinite_values(self) -> None:
+        for value in ("1:nan", "nan:2", "1:inf", "inf:2", "1:-inf"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    parse_ie_ratio(value)
+
 
 if __name__ == "__main__":
     unittest.main()

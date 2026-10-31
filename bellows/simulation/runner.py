@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from bellows.simulation.engine import VentilationSimulation
 from bellows.simulation.recording import SimulationRecorder, SimulationRun
 from bellows.simulation.state import SimulationSample
+from bellows.simulation.validation import require_finite
 
 
 def iter_samples(
@@ -18,6 +19,9 @@ def iter_samples(
 ) -> Iterator[SimulationSample]:
     """Yield samples until the requested simulated duration or breath count."""
 
+    require_finite(dt_s=dt_s)
+    if seconds is not None:
+        require_finite(seconds=seconds)
     if dt_s <= 0.0:
         raise ValueError("dt_s must be greater than zero")
     if seconds is not None and seconds < 0.0:
@@ -63,21 +67,19 @@ def run_simulation(
     breaths: int | None = None,
     include_initial: bool = True,
 ) -> SimulationRun:
-    starting_history_len = len(simulation.breath_history)
     recorder = SimulationRecorder()
     if include_initial:
         recorder.append(simulation.current_sample())
-    recorder.record(
-        iter_samples(
-            simulation,
-            dt_s=dt_s,
-            seconds=seconds,
-            breaths=breaths,
+    with simulation.breath_history.collect() as summaries:
+        recorder.record(
+            iter_samples(
+                simulation,
+                dt_s=dt_s,
+                seconds=seconds,
+                breaths=breaths,
+            )
         )
-    )
-    return recorder.to_run(
-        breath_summaries=list(simulation.breath_history)[starting_history_len:]
-    )
+    return recorder.to_run(breath_summaries=summaries)
 
 
 def _should_continue(

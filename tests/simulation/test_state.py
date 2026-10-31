@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
+from dataclasses import fields, replace
 
 from bellows.simulation.engine import VentilationSimulation
 from bellows.simulation.lung_model import (
@@ -24,6 +24,15 @@ from tests.helpers import run_for_seconds
 
 
 class VentilatorSettingsTests(unittest.TestCase):
+    def test_rejects_nonfinite_numeric_settings(self) -> None:
+        for item in fields(VentilatorSettings):
+            if item.name == "mode":
+                continue
+            for value in (float("nan"), float("inf"), -float("inf")):
+                with self.subTest(field=item.name, value=value):
+                    with self.assertRaisesRegex(ValueError, item.name):
+                        VentilatorSettings(**{item.name: value})
+
     def test_vcv_cycle_uses_rr_and_ie_ratio(self) -> None:
         settings = VentilatorSettings(mode="VCV", rr_bpm=12.0, ie_i=1.0, ie_e=3.0)
         self.assertAlmostEqual(settings.cycle_s, 5.0)
@@ -66,6 +75,23 @@ class VentilatorSettingsTests(unittest.TestCase):
 
 
 class PatientMechanicsTests(unittest.TestCase):
+    def test_rejects_nonfinite_patient_parameters(self) -> None:
+        for name in ("resistance_cm_h2o_s_per_l", "etco2_kpa"):
+            for value in (float("nan"), float("inf"), -float("inf")):
+                with self.subTest(field=name, value=value):
+                    with self.assertRaisesRegex(ValueError, name):
+                        PatientMechanics(**{name: value})
+
+    def test_rejects_nonfinite_lung_parameters(self) -> None:
+        for model in (LinearLung, VenegasLung, VenegasHysteresisLung):
+            for item in fields(model):
+                if item.name == "name":
+                    continue
+                for value in (float("nan"), float("inf"), -float("inf")):
+                    with self.subTest(model=model.__name__, field=item.name, value=value):
+                        with self.assertRaisesRegex(ValueError, item.name):
+                            model(**{item.name: value})
+
     def test_rejects_non_physical_numeric_mechanics(self) -> None:
         with self.assertRaisesRegex(ValueError, "resistance"):
             PatientMechanics(resistance_cm_h2o_s_per_l=0.0)
@@ -74,6 +100,27 @@ class PatientMechanicsTests(unittest.TestCase):
 
 
 class VentilationSimulationStateTests(unittest.TestCase):
+    def test_breath_duration_starts_at_boundary_for_each_mode_and_timestep(self) -> None:
+        for mode in ("VCV", "PCV", "PRVC", "APRV"):
+            for dt_s in (0.01, 0.2):
+                with self.subTest(mode=mode, dt_s=dt_s):
+                    sim = VentilationSimulation(
+                        settings=VentilatorSettings(
+                            mode=mode, rr_bpm=60.0, t_high_s=0.7, t_low_s=0.3,
+                        )
+                    )
+
+                    run = sim.run(seconds=3.0, dt_s=dt_s)
+
+                    self.assertEqual(len(run.breath_summaries), 3)
+                    for breath, summary in enumerate(run.breath_summaries):
+                        self.assertAlmostEqual(summary.start_time_s, breath)
+                        self.assertAlmostEqual(summary.duration_s, 1.0)
+                        self.assertAlmostEqual(
+                            summary.minute_volume_l_min,
+                            summary.delivered_vt_l * 60.0,
+                        )
+
     def test_reset_clears_time_pending_settings_and_returns_to_equilibrium(self) -> None:
         sim = VentilationSimulation(settings=VentilatorSettings(peep_cm_h2o=8.0))
         sim.queue_settings(replace(sim.settings, mode="PCV"))

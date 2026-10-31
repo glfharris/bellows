@@ -1,14 +1,10 @@
 # bellows
 
-*A terminal-based ventilation simulator and waveform visualiser for anaesthesia and ICU education.*
+*A ventilation simulator and waveform visualiser for anaesthesia and ICU education.*
 
-`bellows` is a Python TUI for exploring mechanical ventilation waveforms in real time. It simulates a single-compartment lung with selectable pressure-volume mechanics and renders ventilator traces directly in the terminal.
+`bellows` provides terminal and local browser interfaces for exploring mechanical ventilation waveforms in real time. It simulates a single-compartment lung with selectable pressure-volume mechanics.
 
-It is intended for education, demonstration, and experimentation. It is **not** clinical software — see [Safety and scope](#safety-and-scope).
-
-> Mechanical ventilation in your terminal.
-
-![](bellows.webp)
+![](bellows-web.png)
 
 ---
 
@@ -16,9 +12,13 @@ It is intended for education, demonstration, and experimentation. It is **not** 
 
 ```bash
 uv run bellows
+uv run bellows web --host 127.0.0.1 --port 8765
 ```
 
-Python 3.13+ via `uv`. Dependencies (Textual) are pulled in automatically.
+The first command opens the terminal UI. The second serves the browser UI at
+`http://127.0.0.1:8765`.
+
+Python 3.13+ via `uv`. Dependencies (Textual, FastAPI, Pydantic, and Uvicorn) are pulled in automatically.
 
 Startup options can seed the interactive simulator:
 
@@ -117,16 +117,21 @@ The simulation is decoupled from the UI so it can evolve independently.
 ```text
 bellows/
     app.py                      Textual application and UI state
+    web/server.py               local FastAPI/browser interface
 
     simulation/
         engine.py               simulation loop, breath timing, stats
         state.py                settings, patient mechanics, samples
+        mechanics.py            mechanics solver for ventilator intent
+        metrics.py              breath summaries and rolling history
         lung_model.py           Linear / Venegas / Venegas+H
         presets.py              per-model patient presets
+        runner.py               reusable stepping loops
+        recording.py            recorded runs and sample collections
 
     ventilator/
         modes/
-            base.py             VentilatorMode base, helpers, LastBreathStats
+            base.py             VentilatorMode base and intent helpers
             vcv.py              volume control
             pcv.py              pressure control
             prvc.py             pressure-regulated volume control
@@ -137,6 +142,8 @@ bellows/
 
     ui/
         waveform.py             terminal waveform renderer
+        loop.py                 pressure-volume loop renderer
+        braille.py              shared terminal drawing primitives
 
 tests/
     helpers.py                  shared simulation test helpers
@@ -154,18 +161,6 @@ Design choices:
 - ventilator modes carry their own per-breath state via `on_activate` / `on_breath_end` hooks
 - ventilator setting changes queue and apply at breath boundaries; patient changes apply immediately
 - lung mechanics are pluggable behind a `LungModel` protocol
-
----
-
-## Safety and scope
-
-`bellows` is an educational simulator. It must not be used for:
-
-- clinical decision-making
-- ventilator setup
-- patient monitoring
-- diagnosis
-- treatment recommendations
 
 ---
 

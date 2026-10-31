@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from bellows.simulation.engine import VentilationSimulation
 from bellows.simulation.presets import LUNG_MODELS, PatientPreset, presets_for
 from bellows.simulation.state import PatientMechanics, VentilatorSettings
+from bellows.simulation.validation import require_finite
 from bellows.ventilator.registry import VENTILATOR_MODES
 
 
@@ -78,6 +79,7 @@ def parse_ie_ratio(value: str) -> tuple[float, float]:
     except ValueError as exc:
         raise ValueError("I:E ratio values must be numbers") from exc
 
+    require_finite(ie_i=inspiratory, ie_e=expiratory)
     if inspiratory <= 0.0 or expiratory <= 0.0:
         raise ValueError("I:E ratio values must be greater than zero")
     return inspiratory, expiratory

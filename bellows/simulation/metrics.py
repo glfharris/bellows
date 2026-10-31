@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from bellows.simulation.state import SimulationSample
@@ -117,12 +118,29 @@ class BreathHistory:
 
     maxlen: int = 200
     _breaths: deque[BreathSummary] = field(init=False)
+    _collectors: list[Callable[[BreathSummary], None]] = field(
+        default_factory=list, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         self._breaths = deque(maxlen=self.maxlen)
 
     def append(self, summary: BreathSummary) -> None:
         self._breaths.append(summary)
+        for collect in self._collectors:
+            collect(summary)
+
+    @contextmanager
+    def collect(self) -> Iterator[list[BreathSummary]]:
+        """Collect every summary appended in this scope, including evicted ones."""
+
+        summaries: list[BreathSummary] = []
+        collect = summaries.append
+        self._collectors.append(collect)
+        try:
+            yield summaries
+        finally:
+            self._collectors.remove(collect)
 
     @property
     def last(self) -> BreathSummary | None:

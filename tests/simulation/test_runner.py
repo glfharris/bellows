@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from bellows.simulation.engine import VentilationSimulation
+from bellows.simulation.metrics import BreathHistory
 from bellows.simulation.recording import SimulationRun
 from bellows.simulation.runner import run_samples
 from bellows.simulation.state import VentilatorSettings
@@ -35,6 +36,32 @@ class SimulationRunnerTests(unittest.TestCase):
         self.assertTrue(run)
         self.assertEqual(sim.breath, 2)
         self.assertEqual(len(run.breath_summaries), 2)
+
+    def test_run_keeps_summaries_evicted_from_rolling_history(self) -> None:
+        for maxlen in (0, 2):
+            with self.subTest(maxlen=maxlen):
+                sim = VentilationSimulation(
+                    settings=VentilatorSettings(rr_bpm=60.0),
+                    breath_history=BreathHistory(maxlen=maxlen),
+                )
+
+                # A single step may complete more breaths than history can retain.
+                run = sim.run(seconds=5.0, dt_s=3.0)
+
+                self.assertEqual(run.summary_column("breath"), list(range(5)))
+                self.assertEqual(len(sim.breath_history), maxlen)
+
+    def test_run_only_collects_summaries_completed_during_that_run(self) -> None:
+        sim = VentilationSimulation(
+            settings=VentilatorSettings(rr_bpm=60.0),
+            breath_history=BreathHistory(maxlen=2),
+        )
+        sim.run(breaths=2)
+
+        run = sim.run(breaths=1)
+
+        self.assertEqual(run.summary_column("breath"), [2])
+        self.assertEqual([s.breath for s in sim.breath_history], [1, 2])
 
     def test_run_includes_initial_state_sample_by_default(self) -> None:
         sim = VentilationSimulation(
@@ -73,6 +100,15 @@ class SimulationRunnerTests(unittest.TestCase):
             run_samples(sim, seconds=-1.0)
         with self.assertRaisesRegex(ValueError, "breaths"):
             run_samples(sim, breaths=-1)
+
+    def test_rejects_nonfinite_runner_values(self) -> None:
+        for value in (float("nan"), float("inf"), -float("inf")):
+            for name in ("dt_s", "seconds"):
+                with self.subTest(name=name, value=value):
+                    sim = VentilationSimulation()
+                    with self.assertRaisesRegex(ValueError, name):
+                        sim.run(**{name: value})
+                    self.assertEqual(sim.time_s, 0.0)
 
     def test_runner_includes_boundary_substep_samples(self) -> None:
         sim = VentilationSimulation(settings=VentilatorSettings(rr_bpm=60.0))

@@ -9,6 +9,8 @@ from rich.console import RenderableType
 from rich.text import Text
 from textual.widget import Widget
 
+from bellows.ui.braille import cell_mask, draw_line
+
 from bellows.waveforms.buffers import TracePoint
 
 
@@ -129,7 +131,7 @@ class WaveformWidget(Widget):
             previous: tuple[int, int] | None = None
             for mapped in segment:
                 if previous is not None:
-                    self._draw_line(canvas, previous, mapped)
+                    draw_line(canvas, previous, mapped)
                 else:
                     x, y = mapped
                     canvas[y][x] = True
@@ -223,22 +225,6 @@ class WaveformWidget(Widget):
     def _window_duration_s(self) -> float:
         return max(self.window_end_s - self.window_start_s, 0.001)
 
-    def _draw_line(
-        self,
-        canvas: list[list[bool]],
-        start: tuple[int, int],
-        end: tuple[int, int],
-    ) -> None:
-        x1, y1 = start
-        x2, y2 = end
-        steps = max(abs(x2 - x1), abs(y2 - y1), 1)
-
-        for step in range(steps + 1):
-            fraction = step / steps
-            x = round(x1 + (x2 - x1) * fraction)
-            y = round(y1 + (y2 - y1) * fraction)
-            canvas[y][x] = True
-
     def _braille_rows(
         self,
         canvas: list[list[bool]],
@@ -249,29 +235,10 @@ class WaveformWidget(Widget):
         for char_y in range(height):
             line = []
             for char_x in range(width):
-                mask = 0
-                for sub_y in range(4):
-                    for sub_x in range(2):
-                        y = char_y * 4 + sub_y
-                        x = char_x * 2 + sub_x
-                        if canvas[y][x]:
-                            mask |= self._braille_bit(sub_x, sub_y)
+                mask = cell_mask(canvas, char_x, char_y)
                 line.append(chr(0x2800 + mask) if mask else " ")
             rows.append("".join(line))
         return rows
-
-    def _braille_bit(self, sub_x: int, sub_y: int) -> int:
-        bits = {
-            (0, 0): 0x01,
-            (0, 1): 0x02,
-            (0, 2): 0x04,
-            (0, 3): 0x40,
-            (1, 0): 0x08,
-            (1, 1): 0x10,
-            (1, 2): 0x20,
-            (1, 3): 0x80,
-        }
-        return bits[(sub_x, sub_y)]
 
     def _scale_width(self) -> int:
         return self.SCALE_WIDTH

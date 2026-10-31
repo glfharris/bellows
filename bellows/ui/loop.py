@@ -10,6 +10,7 @@ from rich.text import Text
 from textual.widget import Widget
 
 from bellows.simulation.phase import PHASE_INSPIRATION
+from bellows.ui.braille import cell_mask, draw_line
 
 
 @dataclass(frozen=True)
@@ -146,7 +147,7 @@ class LoopWidget(Widget):
                 if point.phase == PHASE_INSPIRATION
                 else expiration_canvas
             )
-            self._draw_line(target_canvas, previous, mapped)
+            draw_line(target_canvas, previous, mapped)
             previous = mapped
 
     def _draw_points(
@@ -161,7 +162,7 @@ class LoopWidget(Widget):
                 x, y = mapped
                 canvas[y][x] = True
             else:
-                self._draw_line(canvas, previous, mapped)
+                draw_line(canvas, previous, mapped)
             previous = mapped
 
     def _empty_canvas(self, width: int, height: int) -> list[list[bool]]:
@@ -183,22 +184,6 @@ class LoopWidget(Widget):
         y = round((1.0 - max(0.0, min(1.0, y_fraction))) * (sub_height - 1))
         return x, y
 
-    def _draw_line(
-        self,
-        canvas: list[list[bool]],
-        start: tuple[int, int],
-        end: tuple[int, int],
-    ) -> None:
-        x1, y1 = start
-        x2, y2 = end
-        steps = max(abs(x2 - x1), abs(y2 - y1), 1)
-
-        for step in range(steps + 1):
-            fraction = step / steps
-            x = round(x1 + (x2 - x1) * fraction)
-            y = round(y1 + (y2 - y1) * fraction)
-            canvas[y][x] = True
-
     def _append_loop_row(
         self,
         text: Text,
@@ -209,9 +194,9 @@ class LoopWidget(Widget):
         width: int,
     ) -> None:
         for column in range(width):
-            inspiration_mask = self._cell_mask(inspiration_canvas, column, row)
-            expiration_mask = self._cell_mask(expiration_canvas, column, row)
-            previous_mask = self._cell_mask(previous_canvas, column, row)
+            inspiration_mask = cell_mask(inspiration_canvas, column, row)
+            expiration_mask = cell_mask(expiration_canvas, column, row)
+            previous_mask = cell_mask(previous_canvas, column, row)
 
             if inspiration_mask:
                 text.append(chr(0x2800 + inspiration_mask), self.spec.inspiration_color)
@@ -221,29 +206,6 @@ class LoopWidget(Widget):
                 text.append(chr(0x2800 + previous_mask), self.spec.previous_color)
             else:
                 text.append(" ")
-
-    def _cell_mask(self, canvas: list[list[bool]], char_x: int, char_y: int) -> int:
-        mask = 0
-        for sub_y in range(4):
-            for sub_x in range(2):
-                y = char_y * 4 + sub_y
-                x = char_x * 2 + sub_x
-                if canvas[y][x]:
-                    mask |= self._braille_bit(sub_x, sub_y)
-        return mask
-
-    def _braille_bit(self, sub_x: int, sub_y: int) -> int:
-        bits = {
-            (0, 0): 0x01,
-            (0, 1): 0x02,
-            (0, 2): 0x04,
-            (0, 3): 0x40,
-            (1, 0): 0x08,
-            (1, 1): 0x10,
-            (1, 2): 0x20,
-            (1, 3): 0x80,
-        }
-        return bits[(sub_x, sub_y)]
 
     def _scale_width(self) -> int:
         return self.SCALE_WIDTH

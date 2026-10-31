@@ -163,6 +163,8 @@ class VentilationSimulation:
 
     def _step_subinterval(self, dt_s: float) -> SimulationSample:
         mode = self._active_mode()
+        if self._breath_accumulator.current_breath is None:
+            self._breath_accumulator.observe(self.current_sample())
         phase_time_s = self.breath_time_s
         breath = self.breath
 
@@ -203,6 +205,10 @@ class VentilationSimulation:
 
         self.time_s += dt_s
         self.breath_time_s += dt_s
+        # A rounded-down boundary must still complete the breath on this step.
+        cycle_remaining_s = self.settings.cycle_s - self.breath_time_s
+        if dt_s > 0.0 and 0.0 < cycle_remaining_s <= INTEGRATION_EPSILON_S:
+            self.breath_time_s = self.settings.cycle_s
         while self.breath_time_s >= self.settings.cycle_s:
             self._finish_breath(mode, end_time_s=self.time_s)
             self.breath_time_s -= self.settings.cycle_s

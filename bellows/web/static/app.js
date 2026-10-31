@@ -35,6 +35,29 @@ const controls = {
   resistance: document.querySelector("#resistance"),
 };
 
+const controlLabelSpecs = {
+  vt: { unit: " mL" },
+  pinsp: { unit: " cmH2O" },
+  rr: { unit: "/min" },
+  peep: { unit: " cmH2O" },
+  pHigh: { unit: " cmH2O" },
+  pLow: { unit: " cmH2O" },
+  tHigh: { precision: 1, unit: " s" },
+  tLow: { precision: 1, unit: " s" },
+  ieE: {
+    label: "ieValue",
+    format: (value) => `1:${value.toFixed(1).replace(".0", "")}`,
+  },
+  riseTime: { unit: " ms" },
+  expValve: { unit: " cmH2O*s/L" },
+  resistance: { unit: " cmH2O*s/L" },
+  compliance: { unit: " mL/cmH2O" },
+  inflection: { unit: " cmH2O" },
+  slope: { precision: 1, unit: " cmH2O" },
+  recruitable: { unit: " mL" },
+  hysteresis: { precision: 1, unit: " cmH2O" },
+};
+
 const chartSpecs = {
   pressure: {
     label: "Pressure",
@@ -126,7 +149,6 @@ function syncControls(state) {
   );
   syncPatientControls(state.patient);
   updatePatientSummary(state.patient);
-  updateSettingLabels(settings, state.patient);
   updateLabelsFromInputs();
   updateModeControlVisibility(settings.mode);
   const pendingText = state.pending_settings
@@ -187,28 +209,6 @@ function replaceOptions(select, values, selected) {
     select.replaceChildren(...values.map((value) => new Option(value, value)));
   }
   setControlValue(select, selected);
-}
-
-function updateSettingLabels(settings, patient) {
-  document.querySelector("#vtValue").textContent = `${settings.vt_ml.toFixed(0)} mL`;
-  document.querySelector("#pinspValue").textContent = `${settings.pinsp_cm_h2o.toFixed(0)} cmH2O`;
-  document.querySelector("#rrValue").textContent = `${settings.rr_bpm.toFixed(0)}/min`;
-  document.querySelector("#peepValue").textContent = `${settings.peep_cm_h2o.toFixed(0)} cmH2O`;
-  document.querySelector("#pHighValue").textContent = `${settings.p_high_cm_h2o.toFixed(0)} cmH2O`;
-  document.querySelector("#pLowValue").textContent = `${settings.p_low_cm_h2o.toFixed(0)} cmH2O`;
-  document.querySelector("#tHighValue").textContent = `${settings.t_high_s.toFixed(1)} s`;
-  document.querySelector("#tLowValue").textContent = `${settings.t_low_s.toFixed(1)} s`;
-  document.querySelector("#ieValue").textContent = `1:${settings.ie_e.toFixed(1).replace(".0", "")}`;
-  document.querySelector("#riseTimeValue").textContent = `${(settings.pressure_rise_time_s * 1000.0).toFixed(0)} ms`;
-  document.querySelector("#expValveValue").textContent = `${settings.expiratory_valve_resistance_cm_h2o_s_per_l.toFixed(0)} cmH2O*s/L`;
-  document.querySelector("#resistanceValue").textContent = `${patient.resistance_cm_h2o_s_per_l.toFixed(0)} cmH2O*s/L`;
-
-  const params = patient.lung_parameters;
-  document.querySelector("#complianceValue").textContent = `${(params.compliance_ml_per_cm_h2o ?? 50).toFixed(0)} mL/cmH2O`;
-  document.querySelector("#inflectionValue").textContent = `${(params.inflection_cm_h2o ?? 18).toFixed(0)} cmH2O`;
-  document.querySelector("#slopeValue").textContent = `${(params.slope_width_cm_h2o ?? 5).toFixed(1)} cmH2O`;
-  document.querySelector("#recruitableValue").textContent = `${(params.recruitable_volume_ml ?? 1200).toFixed(0)} mL`;
-  document.querySelector("#hysteresisValue").textContent = `${(params.hysteresis_offset_cm_h2o ?? 3).toFixed(1)} cmH2O`;
 }
 
 function updateModeControlVisibility(mode) {
@@ -649,48 +649,19 @@ function wireControls() {
 }
 
 function wireLiveLabels() {
-  const labelInputs = [
-    controls.vt,
-    controls.pinsp,
-    controls.rr,
-    controls.peep,
-    controls.pHigh,
-    controls.pLow,
-    controls.tHigh,
-    controls.tLow,
-    controls.ieE,
-    controls.riseTime,
-    controls.expValve,
-    controls.resistance,
-    controls.compliance,
-    controls.inflection,
-    controls.slope,
-    controls.recruitable,
-    controls.hysteresis,
-  ];
-  for (const input of labelInputs) {
-    input.addEventListener("input", updateLabelsFromInputs);
+  for (const key of Object.keys(controlLabelSpecs)) {
+    controls[key].addEventListener("input", updateLabelsFromInputs);
   }
 }
 
 function updateLabelsFromInputs() {
-  document.querySelector("#vtValue").textContent = `${Number(controls.vt.value).toFixed(0)} mL`;
-  document.querySelector("#pinspValue").textContent = `${Number(controls.pinsp.value).toFixed(0)} cmH2O`;
-  document.querySelector("#rrValue").textContent = `${Number(controls.rr.value).toFixed(0)}/min`;
-  document.querySelector("#peepValue").textContent = `${Number(controls.peep.value).toFixed(0)} cmH2O`;
-  document.querySelector("#pHighValue").textContent = `${Number(controls.pHigh.value).toFixed(0)} cmH2O`;
-  document.querySelector("#pLowValue").textContent = `${Number(controls.pLow.value).toFixed(0)} cmH2O`;
-  document.querySelector("#tHighValue").textContent = `${Number(controls.tHigh.value).toFixed(1)} s`;
-  document.querySelector("#tLowValue").textContent = `${Number(controls.tLow.value).toFixed(1)} s`;
-  document.querySelector("#ieValue").textContent = `1:${Number(controls.ieE.value).toFixed(1).replace(".0", "")}`;
-  document.querySelector("#riseTimeValue").textContent = `${Number(controls.riseTime.value).toFixed(0)} ms`;
-  document.querySelector("#expValveValue").textContent = `${Number(controls.expValve.value).toFixed(0)} cmH2O*s/L`;
-  document.querySelector("#resistanceValue").textContent = `${Number(controls.resistance.value).toFixed(0)} cmH2O*s/L`;
-  document.querySelector("#complianceValue").textContent = `${Number(controls.compliance.value).toFixed(0)} mL/cmH2O`;
-  document.querySelector("#inflectionValue").textContent = `${Number(controls.inflection.value).toFixed(0)} cmH2O`;
-  document.querySelector("#slopeValue").textContent = `${Number(controls.slope.value).toFixed(1)} cmH2O`;
-  document.querySelector("#recruitableValue").textContent = `${Number(controls.recruitable.value).toFixed(0)} mL`;
-  document.querySelector("#hysteresisValue").textContent = `${Number(controls.hysteresis.value).toFixed(1)} cmH2O`;
+  for (const [key, spec] of Object.entries(controlLabelSpecs)) {
+    const value = Number(controls[key].value);
+    const labelId = spec.label ?? `${key}Value`;
+    document.querySelector(`#${labelId}`).textContent = spec.format
+      ? spec.format(value)
+      : `${value.toFixed(spec.precision ?? 0)}${spec.unit}`;
+  }
 }
 
 async function updateSettings(updates) {

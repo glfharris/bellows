@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 
 from bellows.simulation.lung_model import LinearLung, LungModel
+from bellows.simulation.validation import require_finite
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,13 @@ class VentilatorSettings:
     pressure_rise_time_s: float = 0.08
 
     def __post_init__(self) -> None:
+        require_finite(
+            **{
+                item.name: getattr(self, item.name)
+                for item in fields(self)
+                if item.name != "mode"
+            }
+        )
         if self.rr_bpm <= 0.0:
             raise ValueError("rr_bpm must be greater than zero")
         if self.vt_ml < 0.0:
@@ -94,6 +102,10 @@ class PatientMechanics:
     etco2_kpa: float = 5.1
 
     def __post_init__(self) -> None:
+        require_finite(
+            resistance_cm_h2o_s_per_l=self.resistance_cm_h2o_s_per_l,
+            etco2_kpa=self.etco2_kpa,
+        )
         if self.resistance_cm_h2o_s_per_l <= 0.0:
             raise ValueError("resistance_cm_h2o_s_per_l must be greater than zero")
         if self.etco2_kpa < 0.0:

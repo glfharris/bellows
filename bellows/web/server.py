@@ -5,10 +5,10 @@ from __future__ import annotations
 import threading
 from dataclasses import asdict, fields, replace
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -23,8 +23,8 @@ from bellows.simulation.presets import LUNG_MODELS, presets_for
 from bellows.simulation.state import (
     PatientMechanics,
     SimulationSample,
-    VentilatorSettings,
 )
+from bellows.web.schemas import PatientUpdate, PauseRequest, SettingsUpdate
 
 STATIC_DIR = Path(__file__).with_name("static")
 
@@ -79,10 +79,8 @@ class WebSimulationState:
             }
 
     def update_settings(self, updates: dict[str, Any]) -> dict[str, Any]:
-        allowed = {field.name for field in fields(VentilatorSettings)}
-        clean_updates = {key: value for key, value in updates.items() if key in allowed}
         with self.lock:
-            self.simulation.update_settings(**clean_updates)
+            self.simulation.update_settings(**updates)
             return self.snapshot()
 
     def update_patient(self, updates: dict[str, Any]) -> dict[str, Any]:
@@ -122,29 +120,32 @@ def create_app(config: SimulationConfig) -> FastAPI:
         return state.snapshot()
 
     @app.get("/api/samples")
-    def api_samples(seconds: float = 0.05, dt_s: float = 0.01) -> dict[str, Any]:
+    def api_samples(
+        seconds: Annotated[float, Query(ge=0, allow_inf_nan=False)] = 0.05,
+        dt_s: Annotated[float, Query(gt=0, allow_inf_nan=False)] = 0.01,
+    ) -> dict[str, Any]:
         try:
             return state.samples(seconds=seconds, dt_s=dt_s)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/settings")
-    def api_settings(updates: dict[str, Any]) -> dict[str, Any]:
+    def api_settings(updates: SettingsUpdate) -> dict[str, Any]:
         try:
-            return state.update_settings(updates)
+            return state.update_settings(updates.model_dump(exclude_unset=True))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/patient")
-    def api_patient(updates: dict[str, Any]) -> dict[str, Any]:
+    def api_patient(updates: PatientUpdate) -> dict[str, Any]:
         try:
-            return state.update_patient(updates)
+            return state.update_patient(updates.model_dump(exclude_unset=True))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/pause")
-    def api_pause(payload: dict[str, Any]) -> dict[str, Any]:
-        return state.set_paused(bool(payload["paused"]))
+    def api_pause(payload: PauseRequest) -> dict[str, Any]:
+        return state.set_paused(payload.paused)
 
     @app.post("/api/reset")
     def api_reset() -> dict[str, Any]:

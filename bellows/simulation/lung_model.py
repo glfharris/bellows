@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from bellows.simulation.phase import PHASE_EXPIRATION, PHASE_INSPIRATION
+from bellows.simulation.validation import require_finite
 
 
 VENEGAS_FRACTION_EPSILON = 1e-4
@@ -62,6 +63,7 @@ class LinearLung:
     name: str = "Linear"
 
     def __post_init__(self) -> None:
+        require_finite(compliance_l_per_cm_h2o=self.compliance_l_per_cm_h2o)
         if self.compliance_l_per_cm_h2o <= 0.0:
             raise ValueError("compliance_l_per_cm_h2o must be greater than zero")
 
@@ -97,6 +99,7 @@ class VenegasLung:
     name: str = "Venegas"
 
     def __post_init__(self) -> None:
+        require_finite(inflection_cm_h2o=self.inflection_cm_h2o)
         _validate_venegas_parameters(
             slope_width_cm_h2o=self.slope_width_cm_h2o,
             recruitable_volume_l=self.recruitable_volume_l,
@@ -148,6 +151,10 @@ class VenegasHysteresisLung:
     name: str = "Venegas+H"
 
     def __post_init__(self) -> None:
+        require_finite(
+            inflection_cm_h2o=self.inflection_cm_h2o,
+            hysteresis_offset_cm_h2o=self.hysteresis_offset_cm_h2o,
+        )
         _validate_venegas_parameters(
             slope_width_cm_h2o=self.slope_width_cm_h2o,
             recruitable_volume_l=self.recruitable_volume_l,
@@ -254,6 +261,11 @@ def _validate_venegas_parameters(
     recruitable_volume_l: float,
     residual_volume_l: float,
 ) -> None:
+    require_finite(
+        slope_width_cm_h2o=slope_width_cm_h2o,
+        recruitable_volume_l=recruitable_volume_l,
+        residual_volume_l=residual_volume_l,
+    )
     if slope_width_cm_h2o <= 0.0:
         raise ValueError("slope_width_cm_h2o must be greater than zero")
     if recruitable_volume_l <= 0.0:

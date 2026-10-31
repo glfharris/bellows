@@ -35,7 +35,7 @@ Tracking for planned work and known limitations. Items move to commits or get cl
 
 ## Waveform tools
 
-- Pressure-volume loops
+- Pressure-volume loops ✓ (TUI and web)
 - Flow-volume loops
 - Breath-by-breath trends
 - Cursor inspection
